@@ -32,12 +32,13 @@ def start_node_server():
         )
         
         # Log output from Node.js server
-        for line in iter(node_process.stdout.readline, ''):
-            if line:
-                print(f"[Node.js] {line.strip()}")
-                if 'serving on port' in line:
-                    print("Node.js server is ready!")
-                    break
+        if node_process.stdout:
+            for line in iter(node_process.stdout.readline, ''):
+                if line:
+                    print(f"[Node.js] {line.strip()}")
+                    if 'serving on port' in line:
+                        print("Node.js server is ready!")
+                        break
                     
     except Exception as e:
         print(f"Error starting Node.js server: {e}")
