@@ -1,63 +1,132 @@
 #!/usr/bin/env python3
 """
-WSGI-compatible Flask app that creates a simple proxy to Node.js server.
-This satisfies Gunicorn requirements while delegating to Node.js.
+Instagram Bot Management System WSGI Application
+This serves as the main WSGI app that proxies to Express server and manages the bot API
 """
 import subprocess
 import threading
 import time
-import requests
 import os
-from flask import Flask, request, Response
 import signal
+import sys
+import requests
+import atexit
+from flask import Flask, request, Response
 
-# Set environment to development
+# Set environment variables for proper configuration
 os.environ['NODE_ENV'] = 'development'
+os.environ['PORT'] = '3000'  # Express runs on 3000, Flask proxy on 5000
+os.environ['BOT_API_URL'] = 'http://127.0.0.1:8001'
 
-# Global variables
+# Global process variables
 node_process = None
+bot_api_process = None
+servers_started = False
+
+# Flask WSGI app
 app = Flask(__name__)
 
-def start_node_server():
-    """Start Node.js server on port 3000"""
-    global node_process
+def start_bot_api():
+    """Start Python Bot API on port 8001"""
+    global bot_api_process
     try:
-        print("Starting Node.js server on port 3000...")
-        os.environ['PORT'] = '3000'  # Use port 3000 for Node.js
-        node_process = subprocess.Popen(
-            ['npm', 'run', 'dev'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
+        print("[STARTUP] Starting Python Bot API on port 8001...")
+        bot_api_process = subprocess.Popen(
+            [sys.executable, '-c', 'from api import app; app.run(host="127.0.0.1", port=8001, debug=False)'],
+            cwd='bot',
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
         
-        # Log output from Node.js server
-        if node_process.stdout:
-            for line in iter(node_process.stdout.readline, ''):
-                if line:
-                    print(f"[Node.js] {line.strip()}")
-                    if 'serving on port' in line:
-                        print("Node.js server is ready!")
-                        break
+        # Give it time to start and verify it's running
+        time.sleep(3)
+        if bot_api_process.poll() is None:
+            print("[STARTUP] Python Bot API started successfully on port 8001")
+        else:
+            print("[ERROR] Python Bot API failed to start")
                     
     except Exception as e:
-        print(f"Error starting Node.js server: {e}")
+        print(f"[ERROR] Failed to start Python Bot API: {e}")
+
+def start_express_server():
+    """Start Express server on port 3000"""
+    global node_process
+    try:
+        print("[STARTUP] Starting Express server on port 3000...")
+        env = os.environ.copy()
+        env['PORT'] = '3000'  # Ensure Express uses port 3000
+        
+        node_process = subprocess.Popen(
+            ['npm', 'run', 'dev'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env
+        )
+        
+        # Give it time to start and verify it's running
+        time.sleep(6)
+        if node_process.poll() is None:
+            print("[STARTUP] Express server started successfully on port 3000")
+            # Test if the server is actually responding
+            import requests
+            try:
+                resp = requests.get("http://localhost:3000/health", timeout=5)
+                print("[STARTUP] Express server health check: OK")
+                print("[STARTUP] Instagram Bot Management System is ready!")
+            except:
+                print("[WARNING] Express server process is running but not responding yet")
+        else:
+            print("[ERROR] Express server failed to start")
+                    
+    except Exception as e:
+        print(f"[ERROR] Failed to start Express server: {e}")
+
+def start_servers():
+    """Initialize both servers"""
+    global servers_started
+    if not servers_started:
+        servers_started = True
+        print("[STARTUP] Instagram Bot Management System - Initializing...")
+        
+        # Start servers in background threads
+        threading.Thread(target=start_bot_api, daemon=True).start()
+        time.sleep(1)  # Stagger startup
+        threading.Thread(target=start_express_server, daemon=True).start()
 
 def cleanup():
-    """Clean up Node.js process"""
-    global node_process
+    """Clean up all processes"""
+    global node_process, bot_api_process
+    print("[SHUTDOWN] Cleaning up servers...")
+    
     if node_process:
-        node_process.terminate()
-        node_process.wait()
+        try:
+            node_process.terminate()
+            node_process.wait(timeout=5)
+        except:
+            pass
+    
+    if bot_api_process:
+        try:
+            bot_api_process.terminate()
+            bot_api_process.wait(timeout=5)
+        except:
+            pass
 
-# Start Node.js server in background
-threading.Thread(target=start_node_server, daemon=True).start()
-time.sleep(2)  # Give it time to start
+# Register cleanup function
+atexit.register(cleanup)
+
+# Start servers when module is imported
+start_servers()
+
+@app.route('/health')
+def health():
+    """Health check endpoint"""
+    return {"status": "running", "message": "Instagram Bot Management System", "proxy": "active"}
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def proxy(path):
-    """Proxy all requests to Node.js server on port 3000"""
+    """Proxy all requests to Express server on port 3000"""
     try:
         url = f"http://localhost:3000/{path}"
         if request.query_string:
@@ -69,7 +138,8 @@ def proxy(path):
             headers={k: v for k, v in request.headers if k.lower() != 'host'},
             data=request.get_data(),
             cookies=request.cookies,
-            allow_redirects=False
+            allow_redirects=False,
+            timeout=30
         )
         
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
@@ -78,16 +148,12 @@ def proxy(path):
         
         response = Response(resp.content, resp.status_code, headers)
         return response
+        
+    except requests.exceptions.ConnectionError:
+        return "Express server not ready yet. Please wait a moment and refresh.", 503
     except Exception as e:
-        return f"Error connecting to Node.js server: {e}", 502
-
-# Handle cleanup on exit
-def signal_handler(sig, frame):
-    cleanup()
-    exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+        return f"Error connecting to Express server: {e}", 502
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    # This handles direct execution
+    app.run(host='0.0.0.0', port=5000, debug=False)
