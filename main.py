@@ -15,7 +15,7 @@ from flask import Flask, request, Response
 
 # Set environment variables for proper configuration
 os.environ['NODE_ENV'] = 'development'
-os.environ['PORT'] = '3000'  # Express runs on 3000, Flask proxy on 5000
+os.environ['EXPRESS_PORT'] = '3000'  # Express runs on 3000, Flask proxy on 5000
 os.environ['BOT_API_URL'] = 'http://127.0.0.1:8001'
 
 # Global process variables
@@ -34,16 +34,35 @@ def start_bot_api():
         bot_api_process = subprocess.Popen(
             [sys.executable, '-c', 'from api import app; app.run(host="127.0.0.1", port=8001, debug=False)'],
             cwd='bot',
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
         )
         
-        # Give it time to start and verify it's running
-        time.sleep(3)
-        if bot_api_process.poll() is None:
-            print("[STARTUP] Python Bot API started successfully on port 8001")
-        else:
-            print("[ERROR] Python Bot API failed to start")
+        # Wait and check with proper health checking
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            time.sleep(2)  # Wait a bit between checks
+            
+            # Check if process crashed
+            if bot_api_process.poll() is not None:
+                stdout, stderr = bot_api_process.communicate()
+                print(f"[ERROR] Python Bot API process crashed. stdout: {stdout}, stderr: {stderr}")
+                return
+            
+            # Try to reach the health endpoint
+            try:
+                resp = requests.get("http://127.0.0.1:8001/health", timeout=2)
+                if resp.status_code == 200:
+                    print("[STARTUP] Python Bot API started successfully on port 8001")
+                    return
+            except requests.exceptions.RequestException:
+                pass  # Continue trying
+            
+            print(f"[STARTUP] Python Bot API not ready yet, attempt {attempt + 1}/{max_attempts}")
+        
+        # If we get here, it didn't start properly
+        print("[ERROR] Python Bot API failed to start within timeout")
                     
     except Exception as e:
         print(f"[ERROR] Failed to start Python Bot API: {e}")
@@ -55,6 +74,7 @@ def start_express_server():
         print("[STARTUP] Starting Express server on port 3000...")
         env = os.environ.copy()
         env['PORT'] = '3000'  # Ensure Express uses port 3000
+        env['EXPRESS_PORT'] = '3000'
         
         node_process = subprocess.Popen(
             ['npm', 'run', 'dev'],
@@ -123,8 +143,8 @@ def health():
     """Health check endpoint"""
     return {"status": "running", "message": "Instagram Bot Management System", "proxy": "active"}
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
+@app.route('/', defaults={'path': ''}, methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'])
+@app.route('/<path:path>', methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'])
 def proxy(path):
     """Proxy all requests to Express server on port 3000"""
     try:
