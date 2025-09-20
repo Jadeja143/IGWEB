@@ -21,43 +21,77 @@ class BotApiError extends Error {
   }
 }
 
-export async function callBotApi(endpoint: string, method: "GET" | "POST" = "GET", data?: any): Promise<BotApiResponse> {
-  try {
-    const url = `${BOT_API_URL}${endpoint}`;
-    const options: RequestInit = {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-      },
-    };
+export async function callBotApi(endpoint: string, method: "GET" | "POST" = "GET", data?: any, retries: number = 2): Promise<BotApiResponse> {
+  const maxRetries = retries;
+  let lastError: Error = new BotApiError("Unknown error", 500);
 
-    if (data && method === "POST") {
-      options.body = JSON.stringify(data);
-    }
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const url = `${BOT_API_URL}${endpoint}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
 
-    const response = await fetch(url, options);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new BotApiError(
-        errorText || `Bot API request failed with status ${response.status}`,
-        response.status
-      );
-    }
+      const options: RequestInit = {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        signal: controller.signal,
+      };
 
-    return await response.json();
-  } catch (error: any) {
-    if (error instanceof BotApiError) {
-      throw error;
+      if (data && method === "POST") {
+        options.body = JSON.stringify(data);
+      }
+
+      try {
+        const response = await fetch(url, options);
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new BotApiError(
+            errorText || `Bot API request failed with status ${response.status}`,
+            response.status
+          );
+        }
+
+        return await response.json();
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        throw fetchError;
+      }
+    } catch (error: any) {
+      lastError = error;
+      
+      if (error instanceof BotApiError) {
+        // Don't retry client errors (4xx)
+        if (error.status >= 400 && error.status < 500) {
+          throw error;
+        }
+      }
+      
+      // Handle specific error types with better messages
+      if (error.name === 'AbortError') {
+        lastError = new BotApiError(`Bot API timeout after 8 seconds on attempt ${attempt + 1}`, 408);
+      } else if (error.code === "ECONNREFUSED" || error.message?.includes("fetch")) {
+        lastError = new BotApiError(`Bot API server unreachable on attempt ${attempt + 1}. The Python bot API server may not be running.`, 503);
+      } else if (!(error instanceof BotApiError)) {
+        lastError = new BotApiError(`Bot API communication error on attempt ${attempt + 1}: ${error.message}`, 500);
+      }
+      
+      // Don't retry on the last attempt
+      if (attempt === maxRetries) {
+        break;
+      }
+      
+      // Exponential backoff: wait 1s, then 2s, then 4s
+      const delay = Math.pow(2, attempt) * 1000;
+      console.warn(`Bot API request failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms:`, lastError.message);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-    
-    // Handle connection errors
-    if (error.code === "ECONNREFUSED" || error.message?.includes("fetch")) {
-      throw new BotApiError("Bot API server is not running. Please start the Python bot API server.", 503);
-    }
-    
-    throw new BotApiError(`Bot API communication error: ${error.message}`, 500);
   }
+
+  throw lastError;
 }
 
 export async function getBotStatus(): Promise<any> {
