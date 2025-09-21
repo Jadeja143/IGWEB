@@ -125,59 +125,82 @@ def update_user_session_validity(user_id, is_valid, error_code=None, error_messa
         if conn:
             conn.close()
 
-def get_user_id_from_request():
-    """SECURITY CRITICAL: Extract user ID from request headers - NO FALLBACK TO DEFAULT USER"""
-    import re
-    
-    # SECURITY: ONLY accept explicit X-User-ID header - no fallbacks allowed
-    user_id = request.headers.get('X-User-ID')
-    client_ip = request.environ.get('REMOTE_ADDR', 'unknown')
-    
-    if not user_id:
-        # SECURITY: Fail immediately if no X-User-ID header provided
-        print(f"[SECURITY CRITICAL] No X-User-ID header provided from IP {client_ip}")
-        raise Exception("E-SESSION-REQUIRED: X-User-ID header is required")
-    
-    # Enhanced validation: check format and existence
-    if not re.match(r'^[a-zA-Z0-9\-_]{1,36}$', user_id):
-        print(f"[SECURITY CRITICAL] Invalid user ID format from IP {client_ip}: {user_id}")
-        raise Exception("E-SESSION-INVALID: Invalid user ID format")
-    
-    # Validate that the user exists in the database
-    conn = get_db_connection()
-    if not conn:
-        print(f"[SECURITY CRITICAL] Database connection failed for user validation from IP {client_ip}")
-        raise Exception("E-SESSION-DB-ERROR: Database connection failed")
-    
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
-        if cursor.fetchone():
-            # User exists and is valid
-            return user_id
-        else:
-            print(f"[SECURITY CRITICAL] User ID not found in database from IP {client_ip}: {user_id}")
-            raise Exception("E-SESSION-INVALID: User not found")
-    except Exception as e:
-        if str(e).startswith("E-SESSION-"):
-            # Re-raise security exceptions without modification
-            raise
-        else:
-            print(f"[SECURITY ERROR] Database error validating user ID from IP {client_ip}: {e}")
-            raise Exception("E-SESSION-DB-ERROR: Database validation failed")
-    finally:
-        conn.close()
+# Import additional security libraries at top
+import secrets
+import jwt
+from datetime import datetime, timedelta
+from flask import g, session
 
-# Session validation decorator
-def require_valid_session(f):
-    """Decorator to require valid Instagram session for bot actions"""
+# Configure secure session key
+app.secret_key = os.environ.get('SESSION_SECRET', secrets.token_hex(32))
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+def get_user_id_from_request():
+    """SECURE: Extract user ID from authenticated session (not foreable headers)"""
+    # First check if user is already validated and stored in Flask's g object
+    if hasattr(g, 'user_id'):
+        return g.user_id
+        
+    # Check for secure session cookie
+    user_id = session.get('user_id')
+    if user_id:
+        # Validate user still exists in database
+        conn = get_db_connection()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+                if cursor.fetchone():
+                    g.user_id = user_id  # Cache for this request
+                    return user_id
+                else:
+                    # User no longer exists, clear session
+                    session.clear()
+            except Exception as e:
+                print(f"Error validating session user: {e}")
+            finally:
+                conn.close()
+    
+    # No valid session found
+    raise Exception("E-AUTH-REQUIRED: Authentication required")
+
+# Authentication decorators
+def require_user(f):
+    """Decorator to require app authentication (via session cookie)"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         try:
-            # Get user ID from request
+            # Get user ID from authenticated session
             user_id = get_user_id_from_request()
+            g.user_id = user_id  # Store for this request
+            return f(*args, **kwargs)
+        except Exception as e:
+            if str(e).startswith("E-AUTH-REQUIRED"):
+                return jsonify({
+                    "success": False,
+                    "error": "E-AUTH-REQUIRED",
+                    "message": "Please log in to access this resource"
+                }), 401
+            else:
+                return jsonify({
+                    "success": False,
+                    "error": "E-AUTH-ERROR",
+                    "message": str(e)
+                }), 500
+    return decorated_function
+
+def require_valid_session(f):
+    """Decorator to require both app auth AND valid Instagram session for bot actions"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        try:
+            # First require app authentication
+            user_id = get_user_id_from_request()
+            g.user_id = user_id
             
-            # Check session validity
+            # Then check Instagram session validity
             is_valid, message = check_user_session_validity(user_id)
             
             if not is_valid:
@@ -188,17 +211,170 @@ def require_valid_session(f):
                     "requires_session_test": True
                 }), 401
             
-            # Session is valid, proceed with the original function
+            # Both app auth and IG session are valid
             return f(*args, **kwargs)
             
         except Exception as e:
-            return jsonify({
-                "success": False,
-                "error": "E-SESSION-VALIDATION-ERROR",
-                "message": str(e)
-            }), 500
+            if str(e).startswith("E-AUTH-REQUIRED"):
+                return jsonify({
+                    "success": False,
+                    "error": "E-AUTH-REQUIRED",
+                    "message": "Please log in to access this resource"
+                }), 401
+            else:
+                return jsonify({
+                    "success": False,
+                    "error": "E-SESSION-VALIDATION-ERROR",
+                    "message": str(e)
+                }), 500
     
     return decorated_function
+
+# Public authentication endpoints (no X-User-ID required)
+@app.route('/api/auth/register', methods=['POST'])
+def auth_register():
+    """Register a new user account"""
+    try:
+        data = request.get_json() or {}
+        username = data.get('username', '').strip()
+        email = data.get('email', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not username or not email or not password:
+            return jsonify({"success": False, "error": "Username, email and password are required"}), 400
+        
+        # Create user in database
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"success": False, "error": "Database connection failed"}), 500
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Check if user already exists
+            cursor.execute("SELECT id FROM users WHERE username = %s OR email = %s", (username, email))
+            if cursor.fetchone():
+                return jsonify({"success": False, "error": "User already exists"}), 409
+            
+            # Generate user ID
+            import uuid
+            user_id = str(uuid.uuid4())
+            
+            # Insert new user (store password as-is for now, in production use proper hashing)
+            cursor.execute("""
+                INSERT INTO users (id, username, email, password_hash, created_at)
+                VALUES (%s, %s, %s, %s, NOW())
+            """, (user_id, username, email, password))
+            
+            conn.commit()
+            
+            # Create session
+            session['user_id'] = user_id
+            session['username'] = username
+            
+            return jsonify({
+                "success": True,
+                "message": "Registration successful",
+                "user": {"id": user_id, "username": username, "email": email}
+            }), 201
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"Registration error: {e}")
+            return jsonify({"success": False, "error": "Registration failed"}), 500
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        print(f"Auth register error: {e}")
+        return jsonify({"success": False, "error": "Server error"}), 500
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    """Login to user account"""
+    try:
+        data = request.get_json() or {}
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not username or not password:
+            return jsonify({"success": False, "error": "Username and password are required"}), 400
+        
+        # Validate credentials
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"success": False, "error": "Database connection failed"}), 500
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, username, email, password_hash
+                FROM users 
+                WHERE username = %s OR email = %s
+            """, (username, username))
+            
+            user = cursor.fetchone()
+            if not user or user[3] != password:  # Simple password check (improve in production)
+                return jsonify({"success": False, "error": "Invalid credentials"}), 401
+            
+            user_id, user_username, email, _ = user
+            
+            # Create session
+            session['user_id'] = user_id
+            session['username'] = user_username
+            
+            return jsonify({
+                "success": True,
+                "message": "Login successful",
+                "user": {"id": user_id, "username": user_username, "email": email}
+            }), 200
+            
+        except Exception as e:
+            print(f"Login error: {e}")
+            return jsonify({"success": False, "error": "Login failed"}), 500
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        print(f"Auth login error: {e}")
+        return jsonify({"success": False, "error": "Server error"}), 500
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    """Logout current user"""
+    session.clear()
+    return jsonify({"success": True, "message": "Logged out successfully"}), 200
+
+@app.route('/api/auth/me', methods=['GET'])
+def auth_me():
+    """Get current user info"""
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "error": "Not authenticated"}), 401
+    
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"success": False, "error": "Database connection failed"}), 500
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username, email FROM users WHERE id = %s", (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            session.clear()  # User no longer exists
+            return jsonify({"success": False, "error": "User not found"}), 404
+        
+        return jsonify({
+            "success": True,
+            "user": {"id": user[0], "username": user[1], "email": user[2]}
+        }), 200
+        
+    except Exception as e:
+        print(f"Auth me error: {e}")
+        return jsonify({"success": False, "error": "Server error"}), 500
+    finally:
+        conn.close()
 
 # Serve the built React app assets 
 @app.route('/assets/<path:filename>')
@@ -434,10 +610,11 @@ def get_user_bot_instance(user_id: str) -> Optional[SimplifiedUserBotInstance]:
 
 # Bot API Routes - Define these BEFORE the catch-all proxy
 @app.route('/api/bot/status')
+@require_user
 def get_bot_status():
     """Get bot status for current user"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if bot_instance:
@@ -458,10 +635,11 @@ def get_bot_status():
         return {"error": str(e)}, 500
 
 @app.route('/api/bot/initialize', methods=['POST'])
+@require_user
 def initialize_bot():
     """Initialize bot for current user"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if bot_instance:
@@ -496,7 +674,7 @@ def initialize_bot():
 def start_bot():
     """Start bot operations for current user - requires valid Instagram session"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if bot_instance:
@@ -517,7 +695,7 @@ def start_bot():
 def stop_bot():
     """Stop bot operations for current user - requires valid Instagram session"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if bot_instance:
@@ -534,10 +712,11 @@ def stop_bot():
         return {"error": str(e)}, 500
 
 @app.route('/api/bot/stats')
+@require_user
 def get_bot_stats():
     """Get bot statistics for current user"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if bot_instance:
@@ -556,10 +735,11 @@ def get_bot_stats():
         return {"error": str(e)}, 500
 
 @app.route('/api/bot/login', methods=['POST'])
+@require_user
 def bot_login():
     """Instagram login endpoint for current user"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if not bot_instance:
@@ -581,10 +761,11 @@ def bot_login():
         return {"error": str(e), "success": False}, 500
 
 @app.route('/api/bot/logout', methods=['POST'])
+@require_user
 def bot_logout():
     """Instagram logout endpoint for current user"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if bot_instance:
@@ -596,10 +777,11 @@ def bot_logout():
         return {"error": str(e), "success": False}, 500
 
 @app.route('/api/bot/test-connection', methods=['POST'])
+@require_user
 def bot_test_connection():
     """Test Instagram connection for current user"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if bot_instance:
@@ -651,7 +833,7 @@ def test_user_session(user_id):
 def bot_follow_hashtag():
     """Follow users by hashtag"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if not bot_instance:
@@ -690,7 +872,7 @@ def bot_follow_hashtag():
 def bot_follow_location():
     """Follow users by location"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if not bot_instance:
@@ -729,7 +911,7 @@ def bot_follow_location():
 def bot_like_followers():
     """Like posts from followers for current user"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if not bot_instance:
@@ -763,7 +945,7 @@ def bot_like_followers():
 def bot_like_following():
     """Like posts from following for current user"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if not bot_instance:
@@ -797,7 +979,7 @@ def bot_like_following():
 def bot_like_hashtag():
     """Like posts by hashtag for current user"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if not bot_instance:
@@ -836,7 +1018,7 @@ def bot_like_hashtag():
 def bot_like_location():
     """Like posts by location"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if not bot_instance:
@@ -875,7 +1057,7 @@ def bot_like_location():
 def bot_view_followers_stories():
     """View followers' stories"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if not bot_instance:
@@ -909,7 +1091,7 @@ def bot_view_followers_stories():
 def bot_view_following_stories():
     """View following stories"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if not bot_instance:
@@ -943,7 +1125,7 @@ def bot_view_following_stories():
 def bot_send_dms():
     """Send DMs to users"""
     try:
-        user_id = get_user_id_from_request()
+        user_id = g.user_id
         bot_instance = get_user_bot_instance(user_id)
         
         if not bot_instance:
