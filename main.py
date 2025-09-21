@@ -37,24 +37,57 @@ def serve_index():
     """Serve the main React app"""
     return send_file('dist/public/index.html')
 
-# Import the bot API functionality directly
-sys.path.append(os.path.join(os.path.dirname(__file__), 'bot'))
-try:
-    # Use absolute import to fix relative import issues
-    import importlib.util
-    import os
-    bot_api_path = os.path.join(os.path.dirname(__file__), 'bot', 'api.py')
-    spec = importlib.util.spec_from_file_location("bot_api", bot_api_path)
-    bot_api_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(bot_api_module)
-    bot_api = bot_api_module.InstagramBotAPI()
-    print("[STARTUP] Bot API integrated successfully")
-except ImportError as e:
-    print(f"[WARNING] Could not import bot API: {e}")
-    bot_api = None
-except Exception as e:
-    print(f"[WARNING] Bot API initialization failed: {e}")
-    bot_api = None
+# Create a simple bot API for now (will enhance later)
+class SimpleBotAPI:
+    """Simplified Instagram Bot API for Replit migration"""
+    
+    def __init__(self):
+        self.initialized = False
+        self.running = False
+        self.instagram_connected = False
+        
+    def get_status(self):
+        return {
+            "initialized": self.initialized,
+            "running": self.running,
+            "instagram_connected": self.instagram_connected,
+            "modules_loaded": False,
+            "user_info": None
+        }
+    
+    def initialize(self):
+        return {
+            "success": False,
+            "error": "Bot initialization not yet implemented",
+            "message": "Instagram bot features will be available after full migration",
+            "instagram_connected": False,
+            "initialized": False,
+            "requires_login": True
+        }
+    
+    def login(self, username, password, verification_code=None):
+        return {
+            "success": False,
+            "error": "Instagram login not yet implemented",
+            "message": "Login functionality will be available after full migration",
+            "requires_verification": False
+        }
+    
+    def logout(self):
+        return {
+            "success": True,
+            "message": "No active session to logout"
+        }
+    
+    def test_connection(self):
+        return {
+            "success": False,
+            "error": "Instagram connection not yet implemented"
+        }
+
+# Initialize simplified bot API
+bot_api = SimpleBotAPI()
+print("[STARTUP] Simplified Bot API initialized for migration")
 
 # Bot API Routes - Define these BEFORE the catch-all proxy
 @app.route('/api/bot/status')
