@@ -1,12 +1,19 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, unique, pgEnum } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+
+// Role enum for RBAC
+export const roleEnum = pgEnum('role', ['admin', 'user', 'viewer']);
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+  password_hash: text("password_hash").notNull(),
+  role: roleEnum("role").default('user'),
+  must_change_password: boolean("must_change_password").default(false),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
 });
 
 export const botStatus = pgTable("bot_status", {
@@ -18,64 +25,91 @@ export const botStatus = pgTable("bot_status", {
 
 export const dailyStats = pgTable("daily_stats", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  user_id: varchar("user_id").notNull().references(() => users.id),
   date: text("date").notNull(),
   follows: integer("follows").default(0),
   unfollows: integer("unfollows").default(0),
   likes: integer("likes").default(0),
   dms: integer("dms").default(0),
   story_views: integer("story_views").default(0),
-});
+}, (table) => ({
+  uniqueUserDate: unique().on(table.user_id, table.date),
+}));
 
 export const dailyLimits = pgTable("daily_limits", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  user_id: varchar("user_id").references(() => users.id), // NULL = global default
   follows_limit: integer("follows_limit").default(50),
   unfollows_limit: integer("unfollows_limit").default(50),
   likes_limit: integer("likes_limit").default(200),
   dms_limit: integer("dms_limit").default(10),
   story_views_limit: integer("story_views_limit").default(500),
-});
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  uniqueUserId: unique().on(table.user_id),
+}));
 
 export const hashtags = pgTable("hashtags", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  tag: text("tag").notNull().unique(),
+  user_id: varchar("user_id").notNull().references(() => users.id),
+  tag: text("tag").notNull(),
   tier: integer("tier").default(2),
   created_at: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  uniqueUserTag: unique().on(table.user_id, table.tag),
+}));
 
 export const locations = pgTable("locations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  user_id: varchar("user_id").notNull().references(() => users.id),
   name: text("name").notNull(),
   instagram_pk: text("instagram_pk").notNull(),
   created_at: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  uniqueUserLocation: unique().on(table.user_id, table.instagram_pk),
+}));
 
 export const dmTemplates = pgTable("dm_templates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  user_id: varchar("user_id").notNull().references(() => users.id),
   name: text("name").notNull(),
   template: text("template").notNull(),
   usage_count: integer("usage_count").default(0),
   success_rate: integer("success_rate").default(0),
   created_at: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  uniqueUserTemplate: unique().on(table.user_id, table.name),
+}));
 
 export const activityLogs = pgTable("activity_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  user_id: varchar("user_id").references(() => users.id), // NULL for system logs
+  correlation_id: varchar("correlation_id"), // For request tracing
   action: text("action").notNull(),
   details: text("details"),
   status: text("status").notNull(), // 'success', 'error', 'warning'
+  error_code: text("error_code"), // First-class error code column
+  module: text("module"), // Module that generated the log
+  severity: text("severity"), // I, W, E, C
   timestamp: timestamp("timestamp").defaultNow(),
 });
 
 export const instagramCredentials = pgTable("instagram_credentials", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  user_id: varchar("user_id").notNull().references(() => users.id),
   username: text("username").notNull(),
-  password: text("password").notNull(), // This will be encrypted
+  password_encrypted: text("password_encrypted").notNull(), // AES-GCM encrypted
+  session_data_encrypted: text("session_data_encrypted"), // Encrypted session blob
+  encryption_key_id: text("encryption_key_id"), // Key rotation support
   is_active: boolean("is_active").default(true),
   last_login_attempt: timestamp("last_login_attempt"),
   login_successful: boolean("login_successful").default(false),
   created_at: timestamp("created_at").defaultNow(),
   updated_at: timestamp("updated_at").defaultNow(),
-});
+}, (table) => ({
+  uniqueUserId: unique().on(table.user_id),
+}));
 
 export const userBotStatus = pgTable("user_bot_status", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
