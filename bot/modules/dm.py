@@ -10,7 +10,8 @@ from typing import List, Dict
 
 from .database import (
     execute_db, fetch_db, increment_limit, get_limits, get_daily_cap,
-    reset_daily_limits_if_needed
+    reset_daily_limits_if_needed, unified_increment_limit, unified_get_limits, 
+    unified_get_daily_cap, unified_reset_daily_limits_if_needed
 )
 
 log = logging.getLogger(__name__)
@@ -32,9 +33,9 @@ class DMModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             
-            if daily_cap_check and get_limits()["dms"] >= get_daily_cap("dms"):
+            if daily_cap_check and unified_get_limits()["dms"] >= unified_get_daily_cap("dms"):
                 return "📝 Daily DM cap reached."
             
             # Get user info for personalization
@@ -46,7 +47,7 @@ class DMModule:
             
             # Send DM
             self.auth.with_client(self.auth.client.direct_send, message, [user_id])
-            increment_limit("dms", 1)
+            unified_increment_limit("dms", 1)
             
             log.info("Sent DM to %s: %s", username, message[:50])
             return f"✅ DM sent to @{username}"
@@ -62,11 +63,11 @@ class DMModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             count_sent = 0
             
             for user_id in user_ids:
-                if daily_cap_check and get_limits()["dms"] >= get_daily_cap("dms"):
+                if daily_cap_check and unified_get_limits()["dms"] >= unified_get_daily_cap("dms"):
                     log.info("Daily DM cap reached")
                     break
                 

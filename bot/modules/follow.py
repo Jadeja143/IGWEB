@@ -11,7 +11,8 @@ from datetime import datetime, timedelta
 
 from .database import (
     execute_db, fetch_db, increment_limit, get_limits, get_daily_cap,
-    reset_daily_limits_if_needed
+    reset_daily_limits_if_needed, unified_increment_limit, unified_get_limits, 
+    unified_get_daily_cap, unified_reset_daily_limits_if_needed
 )
 
 log = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ class FollowModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             
             # Get recent posts from hashtag
             medias = self.auth.with_client(
@@ -40,7 +41,7 @@ class FollowModule:
             count_followed = 0
             for media in medias:
                 try:
-                    if daily_cap_check and get_limits()["follows"] >= get_daily_cap("follows"):
+                    if daily_cap_check and unified_get_limits()["follows"] >= unified_get_daily_cap("follows"):
                         log.info("Daily follows cap reached")
                         break
                     
@@ -61,7 +62,7 @@ class FollowModule:
                     # Perform follow
                     self.auth.with_client(self.auth.client.user_follow, user_id)
                     self._record_follow(user_id)
-                    increment_limit("follows", 1)
+                    unified_increment_limit("follows", 1)
                     count_followed += 1
                     
                     log.info("Followed user %s from hashtag %s", user_id, hashtag)
@@ -88,7 +89,7 @@ class FollowModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             
             # Search for location
             locations = self.auth.with_client(self.auth.client.location_search, location)
@@ -107,7 +108,7 @@ class FollowModule:
             count_followed = 0
             for media in medias:
                 try:
-                    if daily_cap_check and get_limits()["follows"] >= get_daily_cap("follows"):
+                    if daily_cap_check and unified_get_limits()["follows"] >= unified_get_daily_cap("follows"):
                         log.info("Daily follows cap reached")
                         break
                     
@@ -128,7 +129,7 @@ class FollowModule:
                     # Perform follow
                     self.auth.with_client(self.auth.client.user_follow, user_id)
                     self._record_follow(user_id)
-                    increment_limit("follows", 1)
+                    unified_increment_limit("follows", 1)
                     count_followed += 1
                     
                     log.info("Followed user %s from location %s", user_id, location)
@@ -155,7 +156,7 @@ class FollowModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             cutoff_date = (datetime.now() - timedelta(days=days_threshold)).isoformat()
             
             old_follows = fetch_db(
@@ -166,7 +167,7 @@ class FollowModule:
             count_unfollowed = 0
             for user_id, followed_at in old_follows:
                 try:
-                    if daily_cap_check and get_limits()["unfollows"] >= get_daily_cap("unfollows"):
+                    if daily_cap_check and unified_get_limits()["unfollows"] >= unified_get_daily_cap("unfollows"):
                         log.info("Daily unfollows cap reached")
                         break
                     
@@ -185,7 +186,7 @@ class FollowModule:
                     # Unfollow
                     self.auth.with_client(self.auth.client.user_unfollow, user_id)
                     self._record_unfollow(user_id)
-                    increment_limit("unfollows", 1)
+                    unified_increment_limit("unfollows", 1)
                     count_unfollowed += 1
                     
                     log.info("Unfollowed user %s (followed at %s)", user_id, followed_at)

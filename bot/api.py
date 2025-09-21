@@ -461,7 +461,7 @@ def follow_hashtag():
         
         def run_task():
             try:
-                result = g.bot.follow_module.follow_hashtag_users(hashtag, amount)
+                result = g.bot.follow_module.follow_by_hashtag(hashtag, amount)
                 log.info("Follow hashtag task result: %s", result)
             except Exception as e:
                 log.exception("Error in follow hashtag task: %s", e)
@@ -495,7 +495,7 @@ def follow_location():
         
         def run_task():
             try:
-                result = g.bot.follow_module.follow_location_users(location_pk, amount)
+                result = g.bot.follow_module.follow_by_location(location_pk, amount)
                 log.info("Follow location task result: %s", result)
             except Exception as e:
                 log.exception("Error in follow location task: %s", e)
@@ -530,7 +530,10 @@ def view_stories():
                 elif view_type == 'following':
                     result = g.bot.story_module.view_following_stories()
                 else:
-                    result = g.bot.story_module.view_all_stories()
+                    # For 'all', run both followers and following stories
+                    result_followers = g.bot.story_module.view_followers_stories()
+                    result_following = g.bot.story_module.view_following_stories()
+                    result = f"✅ Followers: {result_followers}\n✅ Following: {result_following}"
                 log.info("View stories task result: %s", result)
             except Exception as e:
                 log.exception("Error in view stories task: %s", e)
@@ -616,6 +619,196 @@ def send_dms():
     except Exception as e:
         log.exception("Error starting send DMs task: %s", e)
         return jsonify({"error": str(e)}), 500
+
+# Login and status endpoints for bot integration
+@app.route('/api/bot/login', methods=['POST'])
+def bot_login():
+    """Login to Instagram with provided credentials"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body required", "success": False}), 400
+        
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not username or not password:
+            return jsonify({
+                "error": "Username and password are required",
+                "success": False
+            }), 400
+        
+        # Validate credentials format
+        if len(username) < 3:
+            return jsonify({
+                "error": "Username must be at least 3 characters long",
+                "success": False
+            }), 400
+        
+        if len(password) < 6:
+            return jsonify({
+                "error": "Password must be at least 6 characters long",
+                "success": False
+            }), 400
+        
+        # Reset bot state for fresh login
+        g.bot.initialized = False
+        g.bot.running = False
+        
+        # Attempt login
+        log.info("Attempting Instagram login for user: %s", username)
+        if not g.bot.auth.login(username, password):
+            log.error("Instagram login failed for user: %s", username)
+            return jsonify({
+                "success": False,
+                "error": "Instagram login failed",
+                "message": "Failed to login to Instagram. Please check your credentials.",
+                "instagram_connected": False
+            }), 401
+        
+        # Initialize modules after successful login
+        g.bot.follow_module = FollowModule(g.bot.auth)
+        g.bot.like_module = LikeModule(g.bot.auth)
+        g.bot.story_module = StoryModule(g.bot.auth)
+        g.bot.dm_module = DMModule(g.bot.auth)
+        g.bot.location_module = LocationModule(g.bot.auth)
+        
+        # Initialize Telegram bot if credentials are available
+        g.bot._initialize_telegram_bot()
+        
+        g.bot.initialized = True
+        g.bot.running = True
+        
+        log.info("Instagram login and initialization successful for user: %s", username)
+        
+        return jsonify({
+            "success": True,
+            "message": "Instagram login successful",
+            "instagram_connected": True,
+            "telegram_connected": g.bot.telegram_connected,
+            "initialized": True,
+            "modules_loaded": True,
+            "username": username
+        })
+        
+    except Exception as e:
+        log.exception("Error during Instagram login: %s", e)
+        return jsonify({
+            "error": "Login failed",
+            "message": f"Unexpected error: {str(e)}",
+            "success": False,
+            "instagram_connected": False
+        }), 500
+
+@app.route('/api/bot/status', methods=['GET'])
+def bot_status():
+    """Get comprehensive bot status"""
+    try:
+        # Get basic status
+        status = g.bot.get_status()
+        
+        # Add additional status info
+        status.update({
+            "bot_api_accessible": True,
+            "modules_loaded": bool(
+                g.bot.follow_module and 
+                g.bot.like_module and 
+                g.bot.story_module and 
+                g.bot.dm_module and 
+                g.bot.location_module
+            )
+        })
+        
+        # Check if credentials are configured (from database or env)
+        try:
+            import requests
+            creds_response = requests.get("http://127.0.0.1:3000/api/instagram/credentials", timeout=3)
+            status["credentials_configured"] = creds_response.status_code == 200
+            if creds_response.status_code == 200:
+                creds_data = creds_response.json()
+                status["credentials_username"] = creds_data.get("username")
+        except Exception:
+            # Fallback to env vars
+            status["credentials_configured"] = bool(os.environ.get("IG_USERNAME") and os.environ.get("IG_PASSWORD"))
+            status["credentials_username"] = os.environ.get("IG_USERNAME")
+        
+        return jsonify(status)
+        
+    except Exception as e:
+        log.exception("Error getting bot status: %s", e)
+        return jsonify({
+            "error": "Failed to get status",
+            "message": str(e),
+            "initialized": False,
+            "running": False,
+            "instagram_connected": False,
+            "telegram_connected": False,
+            "bot_api_accessible": True
+        }), 500
+
+# Telegram bot control endpoints
+@app.route('/api/bot/telegram/status', methods=['GET'])
+def telegram_status():
+    """Get Telegram bot status"""
+    try:
+        return jsonify({
+            "telegram_connected": g.bot.telegram_connected,
+            "telegram_running": g.bot.telegram_bot.is_running() if g.bot.telegram_bot else False,
+            "telegram_configured": bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_ADMIN_ID"))
+        })
+    except Exception as e:
+        log.exception("Error getting Telegram status: %s", e)
+        return jsonify({
+            "telegram_connected": False,
+            "telegram_running": False,
+            "telegram_configured": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/bot/telegram/start', methods=['POST'])
+def start_telegram():
+    """Start Telegram bot"""
+    try:
+        if g.bot.telegram_connected:
+            return jsonify({
+                "message": "Telegram bot is already running",
+                "telegram_connected": True
+            })
+        
+        g.bot._initialize_telegram_bot()
+        
+        return jsonify({
+            "message": "Telegram bot started" if g.bot.telegram_connected else "Failed to start Telegram bot",
+            "telegram_connected": g.bot.telegram_connected
+        })
+        
+    except Exception as e:
+        log.exception("Error starting Telegram bot: %s", e)
+        return jsonify({
+            "error": "Failed to start Telegram bot",
+            "message": str(e),
+            "telegram_connected": False
+        }), 500
+
+@app.route('/api/bot/telegram/stop', methods=['POST'])
+def stop_telegram():
+    """Stop Telegram bot"""
+    try:
+        if g.bot.telegram_bot:
+            g.bot.telegram_bot.stop()
+        g.bot.telegram_connected = False
+        
+        return jsonify({
+            "message": "Telegram bot stopped",
+            "telegram_connected": False
+        })
+        
+    except Exception as e:
+        log.exception("Error stopping Telegram bot: %s", e)
+        return jsonify({
+            "error": "Failed to stop Telegram bot",
+            "message": str(e)
+        }), 500
 
 @app.errorhandler(404)
 def not_found(error):

@@ -10,7 +10,8 @@ from typing import Dict, List
 
 from .database import (
     execute_db, fetch_db, increment_limit, get_limits, get_daily_cap,
-    reset_daily_limits_if_needed
+    reset_daily_limits_if_needed, unified_increment_limit, unified_get_limits, 
+    unified_get_daily_cap, unified_reset_daily_limits_if_needed
 )
 
 log = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ class StoryModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             
             # Get followers list
             followers = self.auth.with_client(
@@ -49,7 +50,7 @@ class StoryModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             
             # Get following list
             following = self.auth.with_client(
@@ -74,7 +75,7 @@ class StoryModule:
         
         for user_id in list(users_dict.keys()):
             try:
-                if daily_cap_check and get_limits()["story_views"] >= get_daily_cap("story_views"):
+                if daily_cap_check and unified_get_limits()["story_views"] >= unified_get_daily_cap("story_views"):
                     log.info("Daily story views cap reached")
                     break
                 
@@ -89,7 +90,7 @@ class StoryModule:
                     continue
                 
                 for story in stories:
-                    if daily_cap_check and get_limits()["story_views"] >= get_daily_cap("story_views"):
+                    if daily_cap_check and unified_get_limits()["story_views"] >= unified_get_daily_cap("story_views"):
                         break
                     
                     # Check if already viewed
@@ -100,7 +101,7 @@ class StoryModule:
                         # View the story
                         self.auth.with_client(self.auth.client.story_view, story.pk)
                         self._record_story_view(str(story.pk))
-                        increment_limit("story_views", 1)
+                        unified_increment_limit("story_views", 1)
                         count_viewed += 1
                         
                         log.info("Viewed story %s from user %s", story.pk, user_id)

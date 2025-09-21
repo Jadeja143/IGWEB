@@ -114,9 +114,13 @@ export async function initializeBot(): Promise<BotApiResponse> {
   return await callBotApi("/api/bot/initialize", "POST");
 }
 
+export async function triggerBotLogin(credentials: { username: string; password: string }): Promise<BotApiResponse> {
+  return await callBotApi("/api/bot/login", "POST", credentials);
+}
+
 export async function executeAction(action: string, data?: any): Promise<void> {
   try {
-    const response = await callBotApi(`/api/bot/actions/${action}`, "POST", data);
+    const response = await callBotApi(`/actions/${action}`, "POST", data);
     
     // Log successful action (best-effort, don't fail the action if logging fails)
     try {

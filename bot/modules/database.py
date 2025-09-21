@@ -6,6 +6,7 @@ Handles SQLite database operations with thread safety
 import sqlite3
 import threading
 import logging
+import requests
 from typing import Tuple, List, Dict, Any
 from datetime import date, datetime
 
@@ -13,6 +14,9 @@ log = logging.getLogger(__name__)
 
 DB_FILE = "bot_data.sqlite"
 db_lock = threading.Lock()
+
+# Node.js server URL for unified API calls
+NODE_API_URL = "http://127.0.0.1:3000"
 
 def get_db_connection():
     """Get a thread-safe database connection with WAL mode."""
@@ -212,3 +216,125 @@ def remove_hashtag(hashtag: str) -> str:
 def get_hashtags() -> List[Tuple[str, int]]:
     """Get all hashtags with their tiers"""
     return fetch_db("SELECT tag, tier FROM hashtags ORDER BY tag")
+
+# ==============================================================================
+# UNIFIED DAILY LIMITS FUNCTIONS - Call Node.js API instead of SQLite
+# ==============================================================================
+
+def unified_increment_limit(action: str, amount: int = 1) -> bool:
+    """Increment daily limit using Node.js API (unified with frontend)"""
+    try:
+        today = date.today().isoformat()
+        
+        # Get current stats
+        response = requests.get(f"{NODE_API_URL}/api/stats/daily?date={today}", timeout=5)
+        if response.status_code == 200:
+            current_stats = response.json()
+        else:
+            # If stats don't exist, they'll be created with default values
+            current_stats = {
+                "follows": 0, "unfollows": 0, "likes": 0, 
+                "dms": 0, "story_views": 0
+            }
+        
+        # Increment the specific action
+        if action in current_stats:
+            current_stats[action] = current_stats.get(action, 0) + amount
+        
+        # Update stats via API
+        update_response = requests.post(
+            f"{NODE_API_URL}/api/stats/daily",
+            json={"date": today, **current_stats},
+            timeout=5
+        )
+        
+        if update_response.status_code == 200:
+            log.debug(f"Successfully incremented {action} by {amount}")
+            return True
+        else:
+            log.warning(f"Failed to increment {action}: {update_response.status_code}")
+            return False
+            
+    except Exception as e:
+        log.error(f"Error incrementing {action} via unified API: {e}")
+        # Fallback to SQLite for reliability
+        increment_limit(action, amount)
+        return False
+
+def unified_get_limits() -> Dict[str, int]:
+    """Get current daily limits using Node.js API (unified with frontend)"""
+    try:
+        today = date.today().isoformat()
+        response = requests.get(f"{NODE_API_URL}/api/stats/daily?date={today}", timeout=5)
+        
+        if response.status_code == 200:
+            stats = response.json()
+            return {
+                "follows": stats.get("follows", 0),
+                "unfollows": stats.get("unfollows", 0), 
+                "likes": stats.get("likes", 0),
+                "dms": stats.get("dms", 0),
+                "story_views": stats.get("story_views", 0)
+            }
+        else:
+            log.warning(f"Failed to get limits from Node API: {response.status_code}")
+            return get_limits()  # Fallback to SQLite
+            
+    except Exception as e:
+        log.error(f"Error getting limits via unified API: {e}")
+        return get_limits()  # Fallback to SQLite
+
+def unified_get_daily_cap(action: str) -> int:
+    """Get daily cap using Node.js API (unified with frontend)"""
+    try:
+        response = requests.get(f"{NODE_API_URL}/api/limits", timeout=5)
+        
+        if response.status_code == 200:
+            limits = response.json()
+            action_key = f"{action}_limit"
+            
+            if action_key in limits:
+                return limits[action_key]
+            else:
+                log.warning(f"Action '{action_key}' not found in limits")
+                return get_daily_cap(action)  # Fallback to SQLite
+        else:
+            log.warning(f"Failed to get daily caps from Node API: {response.status_code}")
+            return get_daily_cap(action)  # Fallback to SQLite
+            
+    except Exception as e:
+        log.error(f"Error getting daily cap for {action} via unified API: {e}")
+        return get_daily_cap(action)  # Fallback to SQLite
+
+def unified_reset_daily_limits_if_needed():
+    """Reset daily limits if needed using Node.js API (unified with frontend)"""
+    try:
+        today = date.today().isoformat()
+        response = requests.get(f"{NODE_API_URL}/api/stats/daily?date={today}", timeout=5)
+        
+        if response.status_code == 404:
+            # Stats don't exist for today, create them
+            default_stats = {
+                "date": today,
+                "follows": 0,
+                "unfollows": 0, 
+                "likes": 0,
+                "dms": 0,
+                "story_views": 0
+            }
+            
+            create_response = requests.post(
+                f"{NODE_API_URL}/api/stats/daily",
+                json=default_stats,
+                timeout=5
+            )
+            
+            if create_response.status_code == 200:
+                log.info(f"Created daily stats for {today}")
+            else:
+                log.warning(f"Failed to create daily stats: {create_response.status_code}")
+                reset_daily_limits_if_needed()  # Fallback to SQLite
+                
+    except Exception as e:
+        log.error(f"Error resetting daily limits via unified API: {e}")
+        reset_daily_limits_if_needed()  # Fallback to SQLite

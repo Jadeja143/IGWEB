@@ -10,7 +10,8 @@ from typing import Dict
 
 from .database import (
     execute_db, fetch_db, increment_limit, get_limits, get_daily_cap,
-    reset_daily_limits_if_needed
+    reset_daily_limits_if_needed, unified_increment_limit, unified_get_limits, 
+    unified_get_daily_cap, unified_reset_daily_limits_if_needed
 )
 
 log = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ class LikeModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             
             # Get followers list
             followers = self.auth.with_client(
@@ -45,7 +46,7 @@ class LikeModule:
             
             for user_id in list(followers.keys()):
                 try:
-                    if daily_cap_check and get_limits()["likes"] >= get_daily_cap("likes"):
+                    if daily_cap_check and unified_get_limits()["likes"] >= unified_get_daily_cap("likes"):
                         log.info("Daily likes cap reached")
                         break
                     
@@ -69,7 +70,7 @@ class LikeModule:
                         if user_likes_count >= likes_per_user:
                             break
                         
-                        if daily_cap_check and get_limits()["likes"] >= get_daily_cap("likes"):
+                        if daily_cap_check and unified_get_limits()["likes"] >= unified_get_daily_cap("likes"):
                             log.info("Daily likes cap reached")
                             break
                         
@@ -81,7 +82,7 @@ class LikeModule:
                             # Like the media
                             self.auth.with_client(self.auth.client.media_like, media.pk)
                             self._record_like(str(media.pk))
-                            increment_limit("likes", 1)
+                            unified_increment_limit("likes", 1)
                             count_liked += 1
                             user_likes_count += 1
                             
@@ -119,7 +120,7 @@ class LikeModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             
             # Get following list
             following = self.auth.with_client(
@@ -137,7 +138,7 @@ class LikeModule:
             
             for user_id in list(following.keys()):
                 try:
-                    if daily_cap_check and get_limits()["likes"] >= get_daily_cap("likes"):
+                    if daily_cap_check and unified_get_limits()["likes"] >= unified_get_daily_cap("likes"):
                         log.info("Daily likes cap reached")
                         break
                     
@@ -161,7 +162,7 @@ class LikeModule:
                         if user_likes_count >= likes_per_user:
                             break
                         
-                        if daily_cap_check and get_limits()["likes"] >= get_daily_cap("likes"):
+                        if daily_cap_check and unified_get_limits()["likes"] >= unified_get_daily_cap("likes"):
                             log.info("Daily likes cap reached")
                             break
                         
@@ -173,7 +174,7 @@ class LikeModule:
                             # Like the media
                             self.auth.with_client(self.auth.client.media_like, media.pk)
                             self._record_like(str(media.pk))
-                            increment_limit("likes", 1)
+                            unified_increment_limit("likes", 1)
                             count_liked += 1
                             user_likes_count += 1
                             
@@ -211,7 +212,7 @@ class LikeModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             
             # Get recent posts from hashtag
             medias = self.auth.with_client(
@@ -223,7 +224,7 @@ class LikeModule:
             count_liked = 0
             for media in medias:
                 try:
-                    if daily_cap_check and get_limits()["likes"] >= get_daily_cap("likes"):
+                    if daily_cap_check and unified_get_limits()["likes"] >= unified_get_daily_cap("likes"):
                         log.info("Daily likes cap reached")
                         break
                     
@@ -234,7 +235,7 @@ class LikeModule:
                     # Like the media
                     self.auth.with_client(self.auth.client.media_like, media.pk)
                     self._record_like(str(media.pk))
-                    increment_limit("likes", 1)
+                    unified_increment_limit("likes", 1)
                     count_liked += 1
                     
                     log.info("Liked media %s from hashtag %s", media.pk, hashtag)
@@ -258,7 +259,7 @@ class LikeModule:
             return "🚫 Instagram not logged in."
         
         try:
-            reset_daily_limits_if_needed()
+            unified_reset_daily_limits_if_needed()
             
             # Search for location
             locations = self.auth.with_client(self.auth.client.location_search, location)
@@ -277,7 +278,7 @@ class LikeModule:
             count_liked = 0
             for media in medias:
                 try:
-                    if daily_cap_check and get_limits()["likes"] >= get_daily_cap("likes"):
+                    if daily_cap_check and unified_get_limits()["likes"] >= unified_get_daily_cap("likes"):
                         log.info("Daily likes cap reached")
                         break
                     
@@ -288,7 +289,7 @@ class LikeModule:
                     # Like the media
                     self.auth.with_client(self.auth.client.media_like, media.pk)
                     self._record_like(str(media.pk))
-                    increment_limit("likes", 1)
+                    unified_increment_limit("likes", 1)
                     count_liked += 1
                     
                     log.info("Liked media %s from location %s", media.pk, location)

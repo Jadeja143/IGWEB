@@ -27,22 +27,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Bot status error:", error);
       
-      // Check for credentials in database for fallback status
-      const hasCredentials = await storage.getInstagramCredentials();
-      
-      // If bot API is not accessible, provide fallback status
-      const fallbackStatus = {
-        initialized: false,
-        running: false,
-        instagram_connected: false,
-        modules_loaded: false,
-        credentials_configured: !!hasCredentials,
-        credentials_username: hasCredentials?.username || null,
-        bot_api_accessible: false,
-        error: error.message || "Bot API not accessible"
-      };
-      
-      res.json(fallbackStatus);
+      // Return error when bot API is not accessible
+      res.status(503).json({
+        success: false,
+        message: "Bot API not accessible",
+        error: error.message || "Failed to connect to bot service"
+      });
     }
   });
 
@@ -81,6 +71,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false,
         error: message,
         message: "Unexpected error during bot initialization"
+      });
+    }
+  });
+
+  // Instagram login trigger endpoint
+  app.post("/api/bot/login", async (req, res) => {
+    try {
+      const { triggerBotLogin } = await import("./botApi");
+      const credentials = req.body;
+      
+      if (!credentials.username || !credentials.password) {
+        return res.status(400).json({
+          success: false,
+          error: "Username and password are required"
+        });
+      }
+      
+      const result = await triggerBotLogin(credentials);
+      
+      // Handle specific error conditions with appropriate status codes  
+      if (!result.success) {
+        if (result.error === "Instagram login failed") {
+          return res.status(401).json(result);
+        }
+        return res.status(500).json(result);
+      }
+      
+      res.json(result);
+    } catch (error: any) {
+      const status = error.status || 500;
+      const message = error.message || "Failed to login to Instagram";
+      console.error("Instagram login error:", error);
+      res.status(status).json({
+        success: false,
+        error: message,
+        message: "Unexpected error during Instagram login"
       });
     }
   });

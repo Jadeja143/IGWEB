@@ -105,15 +105,36 @@ export default function Settings() {
     mutationFn: async (credentials: { username: string; password: string }) => {
       return await apiRequest("POST", "/api/instagram/credentials", credentials);
     },
-    onSuccess: () => {
+    onSuccess: async (data, credentials) => {
       queryClient.invalidateQueries({ queryKey: ["/api/instagram/credentials"] });
+      
+      // Trigger Instagram login after saving credentials
+      try {
+        const loginResult = await apiRequest("POST", "/api/bot/login", credentials);
+        
+        if (loginResult.success) {
+          toast({
+            title: "Success",
+            description: `Instagram credentials saved and login successful for @${credentials.username}`,
+          });
+        } else {
+          toast({
+            title: "Credentials Saved, Login Failed",
+            description: `Credentials saved but login failed: ${loginResult.message || loginResult.error}`,
+            variant: "destructive",
+          });
+        }
+      } catch (loginError: any) {
+        toast({
+          title: "Credentials Saved, Login Failed",
+          description: `Credentials saved but login failed: ${loginError.message}`,
+          variant: "destructive",
+        });
+      }
+      
       queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
       setInstagramCredentials({ username: "", password: "" });
       setShowPasswordField(false);
-      toast({
-        title: "Success",
-        description: "Instagram credentials saved securely",
-      });
     },
     onError: (error) => {
       toast({

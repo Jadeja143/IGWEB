@@ -45,42 +45,18 @@ export default function UserManagement() {
     role: "user",
   });
 
-  // Mock users data - replace with real API call
-  const mockUsers: User[] = [
-    {
-      id: "1",
-      username: "admin",
-      email: "admin@example.com",
-      role: "admin",
-      status: "active",
-      lastLogin: new Date().toISOString(),
-      createdAt: "2024-01-01T00:00:00Z",
-      permissions: ["all"]
-    },
-    {
-      id: "2", 
-      username: "bot_operator",
-      email: "operator@example.com",
-      role: "user",
-      status: "active",
-      lastLogin: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      createdAt: "2024-01-15T00:00:00Z",
-      permissions: ["automation", "content"]
-    }
-  ];
+  // Users will be fetched from real API
 
-  // In real implementation, replace with actual API calls
-  const { data: users = mockUsers } = useQuery<User[]>({
+  // Fetch users from real API
+  const { data: users = [] } = useQuery<User[]>({
     queryKey: ["/api/users"],
     queryFn: async () => {
-      // For now, return mock data
-      return mockUsers;
+      return await apiRequest("GET", "/api/users");
     },
   });
 
   const createUserMutation = useMutation({
     mutationFn: async (userData: typeof newUser) => {
-      // Mock API call - replace with real implementation
       return await apiRequest("POST", "/api/users", userData);
     },
     onSuccess: () => {
@@ -102,7 +78,6 @@ export default function UserManagement() {
 
   const updateUserMutation = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<User> }) => {
-      // Mock API call - replace with real implementation
       return await apiRequest("PUT", `/api/users/${id}`, updates);
     },
     onSuccess: () => {
