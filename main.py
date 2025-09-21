@@ -39,10 +39,9 @@ def serve_index():
 @app.route('/<path:path>')
 def serve_react_routes(path):
     """Serve React routes"""
-    # If it's an API route, let it fall through to the API handlers
+    # If it's an API route, return 404 (let other routes handle it)
     if path.startswith('api/'):
-        # Don't handle API routes here - let Flask's other routes handle them
-        return None
+        return {"error": "API endpoint not found"}, 404
     
     # For all client-side routes, serve the React app
     return send_file('dist/public/index.html')
