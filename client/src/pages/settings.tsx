@@ -238,18 +238,21 @@ export default function Settings() {
                 </div>
               )}
 
-              {/* Toggle to show credential input form */}
-              {!showPasswordField ? (
+              {/* Toggle to show login form */}
+              {!showPasswordField && !botStatus?.instagram_connected ? (
                 <div className="text-center">
                   <Button
                     onClick={() => setShowPasswordField(true)}
                     variant="outline"
-                    data-testid="button-setup-instagram"
+                    data-testid="button-login-instagram"
                   >
-                    {existingCredentials ? "Update Instagram Account" : "Setup Instagram Account"}
+                    Login to Instagram
                   </Button>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Secure login - no credentials will be permanently stored
+                  </p>
                 </div>
-              ) : (
+              ) : showPasswordField ? (
                 <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
                   <div>
                     <Label htmlFor="instagram-username">Instagram Username</Label>
@@ -297,7 +300,7 @@ export default function Settings() {
                     </Button>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
                 <div>
