@@ -35,22 +35,16 @@ def serve_index():
     """Serve the main React app"""
     return send_file('dist/public/index.html')
 
-# Catch-all route for React Router
+# Catch-all route for React Router - this must be AFTER all API routes
 @app.route('/<path:path>')
 def serve_react_routes(path):
     """Serve React routes"""
-    # If it's an API route, don't serve the React app
+    # If it's an API route, let it fall through to the API handlers
     if path.startswith('api/'):
-        return "API endpoint not found", 404
+        # Don't handle API routes here - let Flask's other routes handle them
+        return None
     
-    # Check if there's an actual file (like assets)
-    if '.' in path and not path.startswith(('analytics', 'users', 'automation', 'content', 'settings', 'logs')):
-        try:
-            return send_from_directory('dist/public', path)
-        except:
-            pass
-    
-    # For all other routes (including React routes), serve the React app
+    # For all client-side routes, serve the React app
     return send_file('dist/public/index.html')
 
 # Import the bot API functionality directly
