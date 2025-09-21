@@ -350,6 +350,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Real Instagram login test endpoint (proxy to Python bot API)
+  app.post("/api/instagram/credentials/test-login", async (req, res) => {
+    try {
+      const validatedCredentials = insertInstagramCredentialsSchema.parse(req.body);
+      
+      // Forward request to Python bot API for real Instagram login test
+      const fetch = await import('node-fetch').then(m => m.default);
+      const response = await fetch('http://127.0.0.1:5001/test-instagram-login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(validatedCredentials),
+        timeout: 30000 // 30 second timeout
+      });
+      
+      const result = await response.json();
+      res.status(response.status).json(result);
+      
+    } catch (error: any) {
+      console.error("Instagram login test error:", error);
+      
+      if (error.name === 'ZodError') {
+        res.status(400).json({ message: "Invalid credentials format", errors: error.errors });
+      } else if (error.name === 'FetchError' || error.code === 'ECONNREFUSED') {
+        res.status(503).json({ 
+          message: "Bot API not available", 
+          error: "Unable to connect to Instagram bot service. Please ensure the bot is running."
+        });
+      } else {
+        res.status(500).json({ 
+          message: "Failed to test Instagram login", 
+          error: error.message || "Unknown error occurred"
+        });
+      }
+    }
+  });
+
   app.delete("/api/instagram/credentials", async (req, res) => {
     try {
       const success = await storage.deleteInstagramCredentials();

@@ -24,6 +24,7 @@ from modules.like import LikeModule
 from modules.story import StoryModule
 from modules.dm import DMModule
 from modules.location import LocationModule
+from modules.telegram_bot import TelegramBot
 
 # Logging setup
 logging.basicConfig(
@@ -53,8 +54,11 @@ class InstagramBotAPI:
         self.story_module = None
         self.dm_module = None
         self.location_module = None
+        self.telegram_bot = None
+        self.telegram_thread = None
         self.initialized = False
         self.running = False
+        self.telegram_connected = False
         
     def initialize(self) -> Dict[str, Any]:
         """Initialize all bot components"""
@@ -129,7 +133,7 @@ class InstagramBotAPI:
             
             # Initialize Instagram authentication with better error reporting
             log.info("Attempting Instagram login for user: %s", username)
-            if not self.auth.login():
+            if not self.auth.login(username, password):
                 log.error("Failed to login to Instagram for user: %s", username)
                 return {
                     "success": False,
@@ -148,6 +152,9 @@ class InstagramBotAPI:
             self.dm_module = DMModule(self.auth)
             self.location_module = LocationModule(self.auth)
             
+            # Initialize Telegram bot if token is available
+            self._initialize_telegram_bot()
+            
             self.initialized = True
             self.running = True
             log.info("Instagram bot initialized successfully for user: %s", username)
@@ -156,6 +163,7 @@ class InstagramBotAPI:
                 "success": True,
                 "message": "Bot initialized successfully", 
                 "instagram_connected": True,
+                "telegram_connected": self.telegram_connected,
                 "initialized": True,
                 "modules_loaded": True,
                 "username": username
@@ -171,12 +179,114 @@ class InstagramBotAPI:
                 "initialized": False
             }
     
+    def _initialize_telegram_bot(self):
+        """Initialize Telegram bot if token is available"""
+        try:
+            telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+            # Set default TELEGRAM_ADMIN_ID if not found in environment
+            telegram_admin_id = os.environ.get("TELEGRAM_ADMIN_ID")
+            if not telegram_admin_id:
+                os.environ["TELEGRAM_ADMIN_ID"] = "123456789"
+                telegram_admin_id = "123456789"
+            
+            if not telegram_token:
+                log.info("TELEGRAM_BOT_TOKEN not found, skipping Telegram bot initialization")
+                self.telegram_connected = False
+                return
+            
+            try:
+                admin_id = int(telegram_admin_id)
+            except (ValueError, TypeError):
+                log.warning("Invalid TELEGRAM_ADMIN_ID, using default")
+                admin_id = 123456789
+            
+            # Initialize Telegram bot
+            self.telegram_bot = TelegramBot(telegram_token, admin_id, self)
+            
+            # Start Telegram bot in daemon thread
+            self.telegram_thread = threading.Thread(
+                target=self.telegram_bot.start,
+                daemon=True,
+                name="TelegramBot"
+            )
+            self.telegram_thread.start()
+            
+            # Give it a moment to connect
+            time.sleep(1)
+            
+            self.telegram_connected = self.telegram_bot.is_running()
+            
+            if self.telegram_connected:
+                log.info("Telegram bot initialized and running")
+            else:
+                log.warning("Telegram bot failed to start properly")
+                
+        except Exception as e:
+            log.exception("Failed to initialize Telegram bot: %s", e)
+            self.telegram_connected = False
+    
+    def test_instagram_login(self, username: str, password: str) -> Dict[str, Any]:
+        """Test Instagram login without persisting session"""
+        try:
+            if not username or not password:
+                return {
+                    "success": False,
+                    "error": "Username and password are required"
+                }
+
+            if len(username) < 3:
+                return {
+                    "success": False,
+                    "error": "Username must be at least 3 characters long"
+                }
+
+            if len(password) < 6:
+                return {
+                    "success": False,
+                    "error": "Password must be at least 6 characters long"
+                }
+
+            # Create a temporary auth instance for testing
+            from modules.auth import InstagramAuth
+            temp_auth = InstagramAuth()
+            
+            log.info("Testing Instagram login for user: %s", username)
+            
+            # Try to login with the provided credentials
+            login_success = temp_auth.login(username, password)
+            
+            if login_success:
+                log.info("Instagram login test successful for user: %s", username)
+                return {
+                    "success": True,
+                    "message": "Instagram login successful",
+                    "instagram_connected": True
+                }
+            else:
+                log.warning("Instagram login test failed for user: %s", username)
+                return {
+                    "success": False,
+                    "error": "Instagram login failed",
+                    "message": "Failed to login to Instagram. Please check your credentials and ensure your account is accessible.",
+                    "instagram_connected": False
+                }
+                
+        except Exception as e:
+            log.exception("Instagram login test error: %s", e)
+            return {
+                "success": False,
+                "error": "Login test failed",
+                "message": f"Unexpected error during login test: {str(e)}",
+                "instagram_connected": False
+            }
+    
     def get_status(self) -> Dict[str, Any]:
         """Get bot status"""
         return {
             "initialized": self.initialized,
             "running": self.running,
             "instagram_connected": self.auth.is_logged_in() if self.auth else False,
+            "telegram_connected": self.telegram_connected,
             "modules_loaded": bool(self.follow_module and self.like_module and self.story_module)
         }
 
@@ -218,6 +328,29 @@ def initialize_bot():
     except Exception as e:
         log.exception("Error initializing bot: %s", e)
         return jsonify({"error": str(e), "success": False}), 500
+
+@app.route('/test-instagram-login', methods=['POST'])
+def test_instagram_login():
+    """Test Instagram login credentials without persisting session"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body required", "success": False}), 400
+        
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        
+        result = g.bot.test_instagram_login(username, password)
+        status_code = 200 if result["success"] else 401
+        return jsonify(result), status_code
+        
+    except Exception as e:
+        log.exception("Error testing Instagram login: %s", e)
+        return jsonify({
+            "error": "Login test failed", 
+            "message": f"Unexpected error: {str(e)}",
+            "success": False
+        }), 500
 
 @app.route('/actions/like-followers', methods=['POST'])
 def like_followers():
