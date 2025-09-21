@@ -56,7 +56,6 @@ export class DatabaseStorage implements IStorage {
       // Create default bot status
       const defaultStatus = {
         instagram_connected: false,
-        telegram_connected: false,
         bot_running: false,
         last_updated: new Date(),
       };

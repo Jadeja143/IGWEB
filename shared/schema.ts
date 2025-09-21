@@ -12,7 +12,6 @@ export const users = pgTable("users", {
 export const botStatus = pgTable("bot_status", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   instagram_connected: boolean("instagram_connected").default(false),
-  telegram_connected: boolean("telegram_connected").default(false),
   bot_running: boolean("bot_running").default(false),
   last_updated: timestamp("last_updated").defaultNow(),
 });

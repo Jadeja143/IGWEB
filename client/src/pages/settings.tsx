@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/api";
 import { useState, useEffect } from "react";
-import { AlertTriangle, Shield, MessageSquare, Instagram } from "lucide-react";
+import { AlertTriangle, Shield, Instagram } from "lucide-react";
 import type { DailyLimits, BotStatus } from "@shared/schema";
 
 export default function Settings() {
@@ -468,55 +468,6 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        {/* Telegram Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <MessageSquare className="h-5 w-5" />
-              <span>Telegram Bot</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="telegram-token">Bot Token</Label>
-                <Input
-                  id="telegram-token"
-                  type="password"
-                  placeholder="1234567890:ABC..."
-                  disabled
-                  data-testid="input-telegram-token"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Configure via environment variables
-                </p>
-              </div>
-              <div>
-                <Label htmlFor="telegram-admin">Admin User ID</Label>
-                <Input
-                  id="telegram-admin"
-                  placeholder="123456789"
-                  disabled
-                  data-testid="input-telegram-admin"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Configure via environment variables
-                </p>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                <div>
-                  <p className="font-medium">Connection Status</p>
-                  <p className="text-sm text-muted-foreground">
-                    {botStatus?.telegram_connected ? "Connected" : "Disconnected"}
-                  </p>
-                </div>
-                <div className={`w-3 h-3 rounded-full ${
-                  botStatus?.telegram_connected ? "bg-green-500" : "bg-red-500"
-                }`} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Danger Zone */}

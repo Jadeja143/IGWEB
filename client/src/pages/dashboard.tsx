@@ -212,19 +212,6 @@ export default function Dashboard() {
                 </div>
               </div>
               
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Telegram Bot</span>
-                <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${
-                    botStatus?.telegram_connected ? 'bg-green-500' : 'bg-red-500'
-                  }`}></div>
-                  <span className={`text-sm ${
-                    botStatus?.telegram_connected ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {botStatus?.telegram_connected ? 'Online' : 'Offline'}
-                  </span>
-                </div>
-              </div>
               
               <div className="flex items-center justify-between">
                 <span className="text-sm">Bot Status</span>
