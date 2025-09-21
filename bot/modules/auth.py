@@ -88,7 +88,9 @@ class InstagramAuth:
                 
                 # Handle 2FA if verification code is provided
                 if verification_code:
-                    self.client.challenge_code_handler = lambda: verification_code
+                    def challenge_handler(username: str, choice=None) -> str:
+                        return verification_code or ""
+                    self.client.challenge_code_handler = challenge_handler
                 
                 # Perform login
                 self.client.login(username, password)
@@ -101,7 +103,8 @@ class InstagramAuth:
                 
                 # SECURITY: Clear login failures on successful fresh login
                 self._clear_login_failures(username)
-                log.info("Instagram login successful for user: %s", self._user_info.get('username', 'unknown'))
+                username_display = getattr(self._user_info, 'username', 'unknown') if self._user_info else 'unknown'
+                log.info("Instagram login successful for user: %s", username_display)
                 
                 return {
                     "success": True,
@@ -169,7 +172,8 @@ class InstagramAuth:
             self._logged_in = True
             self._login_timestamp = session_data.get('timestamp')
             
-            log.debug("Valid session restored for user: %s", self._user_info.get('username'))
+            username_display = getattr(self._user_info, 'username', 'unknown') if self._user_info else 'unknown'
+            log.debug("Valid session restored for user: %s", username_display)
             return True
             
         except (LoginRequired, ClientError) as e:
@@ -222,9 +226,12 @@ class InstagramAuth:
     
     def get_user_info(self) -> Optional[Dict[str, Any]]:
         """Get authenticated user information"""
-        if not self.is_logged_in():
+        if not self.is_logged_in() or not self._user_info:
             return None
-        return self._user_info
+        # Convert Account object to dictionary for API compatibility
+        if hasattr(self._user_info, '__dict__'):
+            return self._user_info.__dict__
+        return {"username": getattr(self._user_info, 'username', 'unknown')}
     
     def logout(self):
         """Logout and cleanup session"""

@@ -65,8 +65,11 @@ class InstagramBotAPI:
             current_dir = os.path.dirname(__file__)
             db_module_path = os.path.join(current_dir, 'modules', 'database.py')
             spec = importlib.util.spec_from_file_location("database", db_module_path)
-            db_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(db_module)
+            if spec and spec.loader:
+                db_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(db_module)
+            else:
+                raise ImportError("Could not load database module")
             
             self.db_manager = db_module.DatabaseManager()
             init_database()
@@ -83,8 +86,11 @@ class InstagramBotAPI:
                 current_dir = os.path.dirname(__file__)
                 controller_module_path = os.path.join(current_dir, 'core', 'controller.py')
                 spec = importlib.util.spec_from_file_location("controller", controller_module_path)
-                controller_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(controller_module)
+                if spec and spec.loader:
+                    controller_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(controller_module)
+                else:
+                    raise ImportError("Could not load controller module")
                 
                 self.bot_controller = controller_module.get_bot_controller(self.db_manager)
                 log.info("Bot controller initialized with state: %s", self.bot_controller.state)
@@ -153,7 +159,8 @@ class InstagramBotAPI:
                     self.initialized = True
                 
                 user_info = self.auth.get_user_info()
-                log.info("Bot is initialized with authenticated user: %s", user_info.get('username', 'unknown'))
+                username = user_info.get('username', 'unknown') if user_info else 'unknown'
+                log.info("Bot is initialized with authenticated user: %s", username)
                 
                 return {
                     "success": True,

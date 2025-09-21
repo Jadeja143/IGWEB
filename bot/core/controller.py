@@ -55,7 +55,7 @@ class BotController:
                 log.error("Failed to load state from database: %s", e)
                 self._state = BotState.ERROR
 
-    def set_state(self, state: BotState, reason: str = None):
+    def set_state(self, state: BotState, reason: Optional[str] = None):
         """Set bot state and persist to database"""
         with self._lock:
             previous_state = self._state
@@ -206,7 +206,7 @@ class BotController:
                 import sys
                 import os
                 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'modules'))
-                from auth import InstagramAuth
+                from modules.auth import InstagramAuth
                 
                 # Initialize auth if needed
                 if not hasattr(self, '_auth_instance'):

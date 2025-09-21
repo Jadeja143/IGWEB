@@ -45,6 +45,11 @@ class SimpleBotAPI:
         self.initialized = False
         self.running = False
         self.instagram_connected = False
+        # Add module attributes to prevent LSP errors
+        self.follow_module = None
+        self.like_module = None
+        self.story_module = None
+        self.dm_module = None
         
     def get_status(self):
         return {
@@ -215,7 +220,10 @@ def bot_follow_hashtag():
             # Run in background thread to avoid blocking
             def run_task():
                 try:
-                    result = bot_api.follow_module.follow_by_hashtag(hashtag, amount)
+                    if bot_api.follow_module:
+                        result = bot_api.follow_module.follow_by_hashtag(hashtag, amount)
+                    else:
+                        result = "Follow module not available during migration"
                     print(f"Follow hashtag task result: {result}")
                 except Exception as e:
                     print(f"Error in follow hashtag task: {e}")
@@ -251,7 +259,10 @@ def bot_follow_location():
             # Run in background thread to avoid blocking
             def run_task():
                 try:
-                    result = bot_api.follow_module.follow_by_location(location, amount)
+                    if bot_api.follow_module:
+                        result = bot_api.follow_module.follow_by_location(location, amount)
+                    else:
+                        result = "Follow module not available during migration"
                     print(f"Follow location task result: {result}")
                 except Exception as e:
                     print(f"Error in follow location task: {e}")
@@ -283,7 +294,10 @@ def bot_like_followers():
             # Run in background thread to avoid blocking
             def run_task():
                 try:
-                    result = bot_api.like_module.like_followers_posts(likes_per_user=likes_per_user)
+                    if bot_api.like_module:
+                        result = bot_api.like_module.like_followers_posts(likes_per_user=likes_per_user)
+                    else:
+                        result = "Like module not available during migration"
                     print(f"Like followers task result: {result}")
                 except Exception as e:
                     print(f"Error in like followers task: {e}")
@@ -314,7 +328,10 @@ def bot_like_following():
             # Run in background thread to avoid blocking
             def run_task():
                 try:
-                    result = bot_api.like_module.like_following_posts(likes_per_user=likes_per_user)
+                    if bot_api.like_module:
+                        result = bot_api.like_module.like_following_posts(likes_per_user=likes_per_user)
+                    else:
+                        result = "Like module not available during migration"
                     print(f"Like following task result: {result}")
                 except Exception as e:
                     print(f"Error in like following task: {e}")
@@ -349,7 +366,10 @@ def bot_like_hashtag():
             # Run in background thread to avoid blocking
             def run_task():
                 try:
-                    result = bot_api.like_module.like_hashtag_posts(hashtag, amount)
+                    if bot_api.like_module:
+                        result = bot_api.like_module.like_hashtag_posts(hashtag, amount)
+                    else:
+                        result = "Like module not available during migration"
                     print(f"Like hashtag task result: {result}")
                 except Exception as e:
                     print(f"Error in like hashtag task: {e}")
@@ -385,7 +405,10 @@ def bot_like_location():
             # Run in background thread to avoid blocking
             def run_task():
                 try:
-                    result = bot_api.like_module.like_location_posts(location, amount)
+                    if bot_api.like_module:
+                        result = bot_api.like_module.like_location_posts(location, amount)
+                    else:
+                        result = "Like module not available during migration"
                     print(f"Like location task result: {result}")
                 except Exception as e:
                     print(f"Error in like location task: {e}")
@@ -417,7 +440,10 @@ def bot_view_followers_stories():
             # Run in background thread to avoid blocking
             def run_task():
                 try:
-                    result = bot_api.story_module.view_followers_stories(reaction_chance=reaction_chance)
+                    if bot_api.story_module:
+                        result = bot_api.story_module.view_followers_stories(reaction_chance=reaction_chance)
+                    else:
+                        result = "Story module not available during migration"
                     print(f"View followers stories task result: {result}")
                 except Exception as e:
                     print(f"Error in view followers stories task: {e}")
@@ -448,7 +474,10 @@ def bot_view_following_stories():
             # Run in background thread to avoid blocking
             def run_task():
                 try:
-                    result = bot_api.story_module.view_following_stories(reaction_chance=reaction_chance)
+                    if bot_api.story_module:
+                        result = bot_api.story_module.view_following_stories(reaction_chance=reaction_chance)
+                    else:
+                        result = "Story module not available during migration"
                     print(f"View following stories task result: {result}")
                 except Exception as e:
                     print(f"Error in view following stories task: {e}")
@@ -487,7 +516,10 @@ def bot_send_dms():
                     # Get user IDs based on target type
                     user_ids = []
                     if target_type == 'followers':
-                        result = bot_api.dm_module.dm_recent_followers(template, amount)
+                        if bot_api.dm_module:
+                            result = bot_api.dm_module.dm_recent_followers(template, amount)
+                        else:
+                            result = "DM module not available during migration"
                     else:
                         result = f"DM target type '{target_type}' not implemented yet"
                     print(f"Send DMs task result: {result}")
