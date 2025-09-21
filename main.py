@@ -37,100 +37,6 @@ def serve_index():
     """Serve the main React app"""
     return send_file('dist/public/index.html')
 
-# Proxy API routes to Node.js Express server
-@app.route('/api/<path:path>', methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'])
-def proxy_to_express(path):
-    """Proxy API requests to the Node.js Express server"""
-    if path.startswith('bot/'):
-        # Bot-specific routes are handled by Flask directly
-        return {"error": f"API endpoint /api/{path} not implemented in Flask"}, 404
-    
-    if path.startswith('actions/'):
-        # Redirect automation actions to bot endpoints
-        bot_endpoint = f"/api/bot/{path}"
-        try:
-            # Forward the request to the bot endpoint
-            flask_url = f"http://127.0.0.1:5000{bot_endpoint}"
-            
-            # Get request data
-            json_data = None
-            if request.is_json:
-                json_data = request.get_json()
-            
-            # Convert Flask request args to dict for requests library
-            params_dict = dict(request.args.items()) if request.args else None
-            
-            # Forward the request to Flask bot endpoint
-            if request.method == 'GET':
-                resp = requests.get(flask_url, params=params_dict, timeout=10)
-            else:
-                resp = requests.request(
-                    method=request.method,
-                    url=flask_url,
-                    json=json_data,
-                    params=params_dict,
-                    timeout=10
-                )
-            
-            # Return the response from bot endpoint
-            try:
-                return resp.json(), resp.status_code
-            except ValueError:
-                # Handle non-JSON responses
-                return {"error": "Invalid JSON response", "content": resp.text[:500]}, resp.status_code
-            
-        except requests.exceptions.ConnectionError:
-            return {"error": "Bot API not available", "message": "The bot API is not running"}, 503
-        except requests.exceptions.Timeout:
-            return {"error": "Request timeout"}, 504
-        except Exception as e:
-            return {"error": f"Bot API error: {str(e)}"}, 500
-    
-    # All other API routes are proxied to Express server
-    try:
-        express_url = f"http://127.0.0.1:3000/api/{path}"
-        
-        # Get request data
-        json_data = None
-        if request.is_json:
-            json_data = request.get_json()
-        
-        # Convert Flask request args to dict for requests library
-        params_dict = dict(request.args.items()) if request.args else None
-        
-        # Forward the request to Express server
-        if request.method == 'GET':
-            resp = requests.get(express_url, params=params_dict, timeout=10)
-        else:
-            resp = requests.request(
-                method=request.method,
-                url=express_url,
-                json=json_data,
-                params=params_dict,
-                timeout=10
-            )
-        
-        # Return the response from Express server
-        try:
-            return resp.json(), resp.status_code
-        except ValueError:
-            # Handle non-JSON responses
-            return {"error": "Invalid JSON response", "content": resp.text[:500]}, resp.status_code
-        
-    except requests.exceptions.ConnectionError:
-        return {"error": "Express server not available", "message": "The Node.js API server is not running"}, 503
-    except requests.exceptions.Timeout:
-        return {"error": "Request timeout"}, 504
-    except Exception as e:
-        return {"error": f"Proxy error: {str(e)}"}, 500
-
-# Catch-all route for React Router - this must be AFTER all API routes
-@app.route('/<path:path>')
-def serve_react_routes(path):
-    """Serve React routes"""
-    # For all client-side routes, serve the React app
-    return send_file('dist/public/index.html')
-
 # Import the bot API functionality directly
 sys.path.append(os.path.join(os.path.dirname(__file__), 'bot'))
 try:
@@ -141,7 +47,7 @@ except ImportError as e:
     print(f"[WARNING] Could not import bot API: {e}")
     bot_api = None
 
-# API Routes - integrate bot functionality directly
+# Bot API Routes - Define these BEFORE the catch-all proxy
 @app.route('/api/bot/status')
 def get_bot_status():
     """Get bot status"""
@@ -504,6 +410,58 @@ def bot_send_dms():
         except Exception as e:
             return {"error": str(e)}, 500
     return {"error": "Bot API not available"}, 503
+
+# Proxy API routes to Node.js Express server (for non-bot routes)
+@app.route('/api/<path:path>', methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'])
+def proxy_to_express(path):
+    """Proxy API requests to the Node.js Express server"""
+    # Bot routes are handled by Flask route handlers defined above
+    # This catch-all only handles non-bot routes
+    
+    # All other API routes are proxied to Express server
+    try:
+        express_url = f"http://127.0.0.1:3000/api/{path}"
+        
+        # Get request data
+        json_data = None
+        if request.is_json:
+            json_data = request.get_json()
+        
+        # Convert Flask request args to dict for requests library
+        params_dict = dict(request.args.items()) if request.args else None
+        
+        # Forward the request to Express server
+        if request.method == 'GET':
+            resp = requests.get(express_url, params=params_dict, timeout=10)
+        else:
+            resp = requests.request(
+                method=request.method,
+                url=express_url,
+                json=json_data,
+                params=params_dict,
+                timeout=10
+            )
+        
+        # Return the response from Express server
+        try:
+            return resp.json(), resp.status_code
+        except ValueError:
+            # Handle non-JSON responses
+            return {"error": "Invalid JSON response", "content": resp.text[:500]}, resp.status_code
+        
+    except requests.exceptions.ConnectionError:
+        return {"error": "Express server not available", "message": "The Node.js API server is not running"}, 503
+    except requests.exceptions.Timeout:
+        return {"error": "Request timeout"}, 504
+    except Exception as e:
+        return {"error": f"Proxy error: {str(e)}"}, 500
+
+# Catch-all route for React Router - this must be AFTER all API routes
+@app.route('/<path:path>')
+def serve_react_routes(path):
+    """Serve React routes"""
+    # For all client-side routes, serve the React app
+    return send_file('dist/public/index.html')
 
 def start_express_server():
     """Start the Node.js Express server"""

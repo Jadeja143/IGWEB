@@ -183,10 +183,10 @@ class InstagramBotAPI:
         """Initialize Telegram bot if token is available"""
         try:
             telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-            # Set default TELEGRAM_ADMIN_ID if not found in environment
-            telegram_admin_id = os.environ.get("TELEGRAM_ADMIN_ID")
+            # Check for ADMIN_USER_ID (the actual environment variable name)
+            telegram_admin_id = os.environ.get("ADMIN_USER_ID") or os.environ.get("TELEGRAM_ADMIN_ID")
             if not telegram_admin_id:
-                os.environ["TELEGRAM_ADMIN_ID"] = "123456789"
+                log.warning("No ADMIN_USER_ID or TELEGRAM_ADMIN_ID found, using default")
                 telegram_admin_id = "123456789"
             
             if not telegram_token:
