@@ -19,10 +19,21 @@ export default function Login() {
     setIsLoading(true);
 
     try {
+      // Fetch CSRF token first
+      const csrfResponse = await fetch("/api/csrf-token", {
+        credentials: "include",
+      });
+      const csrfData = await csrfResponse.json();
+      
+      if (!csrfData.success) {
+        throw new Error("Failed to get CSRF token");
+      }
+
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-CSRF-Token": csrfData.csrf_token,
         },
         credentials: "include",
         body: JSON.stringify({ username, password }),
@@ -59,10 +70,21 @@ export default function Login() {
     setIsLoading(true);
 
     try {
+      // Fetch CSRF token first
+      const csrfResponse = await fetch("/api/csrf-token", {
+        credentials: "include",
+      });
+      const csrfData = await csrfResponse.json();
+      
+      if (!csrfData.success) {
+        throw new Error("Failed to get CSRF token");
+      }
+
       const response = await fetch("/api/auth/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-CSRF-Token": csrfData.csrf_token,
         },
         credentials: "include",
         body: JSON.stringify({ username, password }),
