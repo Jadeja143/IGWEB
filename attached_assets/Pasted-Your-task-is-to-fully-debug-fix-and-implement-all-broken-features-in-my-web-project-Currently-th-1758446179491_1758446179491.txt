@@ -1,0 +1,156 @@
+Your task is to fully debug, fix, and implement all broken features in my web project.
+Currently, the system has many demo placeholders, unresponsive buttons, and missing functionalities.
+I want you to remove all demo data, replace with working logic, and make the system production-ready.
+
+🔧 Issues & Fixes (Detailed)
+1. Automation Page
+
+Issue: Page not functioning; multiple buttons unresponsive.
+
+Fix:
+
+Debug all button click handlers.
+
+Ensure each automation feature executes its logic (not demo placeholders).
+
+Replace "demo starting" with real execution logic.
+
+2. Login System (Instagram Integration)
+
+Issue:
+
+Cannot log into Instagram account.
+
+Input fields for credentials look like a demo, not functional.
+
+Fix:
+
+Implement real Instagram login using API / OAuth / instagrapi or other library.
+
+Ensure user can securely enter username and password.
+
+Remove all demo login placeholders.
+
+Store credentials securely (encrypted or via session, not plain text).
+
+3. Analytics Page
+
+Issue: Analytics page broken → 404 error.
+
+Fix:
+
+Restore proper routing and backend endpoint for analytics.
+
+Connect to real analytics data source.
+
+Display user activity, engagement, growth charts, etc.
+
+4. Telegram Bot Integration
+
+Issue: Bot not connecting even though valid token is provided in .env.
+
+Fix:
+
+Check .env variable loading logic.
+
+Debug bot initialization code.
+
+Ensure bot authenticates and connects to Telegram API.
+
+Test commands and confirm real responses (not demo).
+
+5. System Health Page
+
+Issue: Showing only demo system metrics.
+
+Fix:
+
+Connect to real server/system health monitoring (CPU, RAM, uptime, errors).
+
+Display live data instead of hardcoded values.
+
+6. Demo Features
+
+Issue: Many features are demo placeholders (demo data, demo start, demo login).
+
+Fix:
+
+Identify and remove all demo code.
+
+Replace with real logic, APIs, and working modules.
+
+7. User Management Page
+
+Issue: Page gives 404 error.
+
+Fix:
+
+Implement proper user management system (CRUD – create, read, update, delete).
+
+Ensure admin can manage users (add, block, edit roles).
+
+Fix page routing and backend API.
+
+8. Quick Actions
+
+Issue: None of the quick action buttons work.
+
+Fix:
+
+Debug frontend click events.
+
+Link buttons to real backend functions.
+
+Test each action for correct execution.
+
+9. Follow / Story / Other Modules
+
+Issue: All modules show demo state like "demo starting", not real execution.
+
+Fix:
+
+Connect Follow Module to real Instagram automation logic.
+
+Fix Story Module to fetch and interact with stories properly.
+
+Ensure other modules (likes, comments, etc.) work with real accounts.
+
+10. Activity Logs Page
+
+Issue: Page broken → 404 error.
+
+Fix:
+
+Implement real activity logging system.
+
+Store actions in database (follows, likes, logins, etc.).
+
+Display logs on page with filters (date/user/action).
+
+11. Overall System Fix & Stabilization
+
+Issue: Web project is unstable with many errors across multiple pages.
+
+Fix:
+
+Perform full code review & debugging.
+
+Fix routing errors, API connections, and data flow.
+
+Ensure system is fully working end-to-end.
+
+Remove all demo placeholders permanently.
+
+✅ Final Deliverables
+
+A fully working, production-ready web project.
+
+No 404 errors on any page.
+
+All buttons, modules, and features fully functional.
+
+Instagram login & automation working.
+
+Telegram bot connected and operational.
+
+System health, analytics, user management, quick actions, and activity logs all functional with real data.
