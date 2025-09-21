@@ -57,15 +57,18 @@ def proxy_to_express(path):
             if request.is_json:
                 json_data = request.get_json()
             
+            # Convert Flask request args to dict for requests library
+            params_dict = dict(request.args.items()) if request.args else None
+            
             # Forward the request to Flask bot endpoint
             if request.method == 'GET':
-                resp = requests.get(flask_url, params=request.args, timeout=10)
+                resp = requests.get(flask_url, params=params_dict, timeout=10)
             else:
                 resp = requests.request(
                     method=request.method,
                     url=flask_url,
                     json=json_data,
-                    params=request.args,
+                    params=params_dict,
                     timeout=10
                 )
             
@@ -92,15 +95,18 @@ def proxy_to_express(path):
         if request.is_json:
             json_data = request.get_json()
         
+        # Convert Flask request args to dict for requests library
+        params_dict = dict(request.args.items()) if request.args else None
+        
         # Forward the request to Express server
         if request.method == 'GET':
-            resp = requests.get(express_url, params=request.args, timeout=10)
+            resp = requests.get(express_url, params=params_dict, timeout=10)
         else:
             resp = requests.request(
                 method=request.method,
                 url=express_url,
                 json=json_data,
-                params=request.args,
+                params=params_dict,
                 timeout=10
             )
         
@@ -128,7 +134,7 @@ def serve_react_routes(path):
 # Import the bot API functionality directly
 sys.path.append(os.path.join(os.path.dirname(__file__), 'bot'))
 try:
-    from api import InstagramBotAPI
+    from bot.api import InstagramBotAPI
     bot_api = InstagramBotAPI()
     print("[STARTUP] Bot API integrated successfully")
 except ImportError as e:
@@ -200,7 +206,7 @@ def bot_follow_hashtag():
             if not hashtag:
                 return {"error": "Hashtag is required"}, 400
             
-            if not bot_api.initialized or not bot_api.follow_module:
+            if not bot_api or not bot_api.initialized or not bot_api.follow_module:
                 return {"error": "Bot not initialized"}, 503
             
             # Run in background thread to avoid blocking
@@ -236,7 +242,7 @@ def bot_follow_location():
             if not location:
                 return {"error": "Location is required"}, 400
             
-            if not bot_api.initialized or not bot_api.follow_module:
+            if not bot_api or not bot_api.initialized or not bot_api.follow_module:
                 return {"error": "Bot not initialized"}, 503
             
             # Run in background thread to avoid blocking
@@ -268,7 +274,7 @@ def bot_like_followers():
             data = request.get_json() or {}
             likes_per_user = data.get('likes_per_user', 2)
             
-            if not bot_api.initialized or not bot_api.like_module:
+            if not bot_api or not bot_api.initialized or not bot_api.like_module:
                 return {"error": "Bot not initialized"}, 503
             
             # Run in background thread to avoid blocking
@@ -299,7 +305,7 @@ def bot_like_following():
             data = request.get_json() or {}
             likes_per_user = data.get('likes_per_user', 2)
             
-            if not bot_api.initialized or not bot_api.like_module:
+            if not bot_api or not bot_api.initialized or not bot_api.like_module:
                 return {"error": "Bot not initialized"}, 503
             
             # Run in background thread to avoid blocking
@@ -334,7 +340,7 @@ def bot_like_hashtag():
             if not hashtag:
                 return {"error": "Hashtag is required"}, 400
             
-            if not bot_api.initialized or not bot_api.like_module:
+            if not bot_api or not bot_api.initialized or not bot_api.like_module:
                 return {"error": "Bot not initialized"}, 503
             
             # Run in background thread to avoid blocking
@@ -370,7 +376,7 @@ def bot_like_location():
             if not location:
                 return {"error": "Location is required"}, 400
             
-            if not bot_api.initialized or not bot_api.like_module:
+            if not bot_api or not bot_api.initialized or not bot_api.like_module:
                 return {"error": "Bot not initialized"}, 503
             
             # Run in background thread to avoid blocking
@@ -402,7 +408,7 @@ def bot_view_followers_stories():
             data = request.get_json() or {}
             reaction_chance = data.get('reaction_chance', 0.05)
             
-            if not bot_api.initialized or not bot_api.story_module:
+            if not bot_api or not bot_api.initialized or not bot_api.story_module:
                 return {"error": "Bot not initialized"}, 503
             
             # Run in background thread to avoid blocking
@@ -433,7 +439,7 @@ def bot_view_following_stories():
             data = request.get_json() or {}
             reaction_chance = data.get('reaction_chance', 0.05)
             
-            if not bot_api.initialized or not bot_api.story_module:
+            if not bot_api or not bot_api.initialized or not bot_api.story_module:
                 return {"error": "Bot not initialized"}, 503
             
             # Run in background thread to avoid blocking
@@ -469,7 +475,7 @@ def bot_send_dms():
             if not template:
                 return {"error": "DM template is required"}, 400
             
-            if not bot_api.initialized or not bot_api.dm_module:
+            if not bot_api or not bot_api.initialized or not bot_api.dm_module:
                 return {"error": "Bot not initialized"}, 503
             
             # Run in background thread to avoid blocking
