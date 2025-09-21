@@ -55,14 +55,24 @@ async function requireValidSession(req: Request, res: Response, next: NextFuncti
       });
     }
 
-    // Check user's session validity
+    // SECURITY CRITICAL: Check user's session validity AND bot_running flag
     const userBotStatus = await storage.getUserBotStatus(userId);
     
     if (!userBotStatus || !userBotStatus.session_valid) {
       return res.status(401).json({
         success: false,
-        error: "Session validation failed",
+        error: "E-SESSION-INVALID",
         message: userBotStatus?.last_error_message || "Instagram session is invalid",
+        requires_session_test: true
+      });
+    }
+
+    // SECURITY CRITICAL: Check bot_running flag - automation MUST be disabled if bot_running=false
+    if (!userBotStatus.bot_running) {
+      return res.status(401).json({
+        success: false,
+        error: "E-SESSION-BOT-STOPPED",
+        message: "Bot automation is disabled for this user",
         requires_session_test: true
       });
     }
@@ -75,7 +85,7 @@ async function requireValidSession(req: Request, res: Response, next: NextFuncti
       if (hoursAgo > 24) {
         return res.status(401).json({
           success: false,
-          error: "Session expired",
+          error: "E-SESSION-EXPIRED",
           message: "Session not tested recently - please test connection",
           requires_session_test: true
         });
@@ -548,7 +558,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Automation actions
   app.post("/api/actions/like-followers", requireValidSession, async (req, res) => {
     try {
-      await executeAction("like-followers", req.body);
+      await executeAction("like-followers", req.body, { 'X-User-ID': req.headers['x-user-id'] as string });
       res.json({ message: "Like followers task started" });
     } catch (error: any) {
       const status = error.status || 500;
@@ -564,7 +574,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Hashtag is required" });
       }
       
-      await executeAction("follow-hashtag", { hashtag, amount });
+      await executeAction("follow-hashtag", { hashtag, amount }, { 'X-User-ID': req.headers['x-user-id'] as string });
       res.json({ message: `Follow hashtag #${hashtag} task started` });
     } catch (error: any) {
       const status = error.status || 500;
@@ -575,7 +585,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/actions/view-stories", requireValidSession, async (req, res) => {
     try {
-      await executeAction("view-stories", req.body);
+      await executeAction("view-stories", req.body, { 'X-User-ID': req.headers['x-user-id'] as string });
       res.json({ message: "View stories task started" });
     } catch (error: any) {
       const status = error.status || 500;
@@ -587,7 +597,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Additional action endpoints
   app.post("/api/actions/like-following", requireValidSession, async (req, res) => {
     try {
-      await executeAction("like-following", req.body);
+      await executeAction("like-following", req.body, { 'X-User-ID': req.headers['x-user-id'] as string });
       res.json({ message: "Like following task started" });
     } catch (error: any) {
       const status = error.status || 500;
@@ -603,7 +613,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Hashtag is required" });
       }
       
-      await executeAction("like-hashtag", { hashtag, amount });
+      await executeAction("like-hashtag", { hashtag, amount }, { 'X-User-ID': req.headers['x-user-id'] as string });
       res.json({ message: `Like hashtag #${hashtag} task started` });
     } catch (error: any) {
       const status = error.status || 500;
@@ -619,7 +629,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Location PK is required" });
       }
       
-      await executeAction("like-location", { location_pk, amount });
+      await executeAction("like-location", { location_pk, amount }, { 'X-User-ID': req.headers['x-user-id'] as string });
       res.json({ message: "Like location task started" });
     } catch (error: any) {
       const status = error.status || 500;
@@ -635,7 +645,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Location PK is required" });
       }
       
-      await executeAction("follow-location", { location_pk, amount });
+      await executeAction("follow-location", { location_pk, amount }, { 'X-User-ID': req.headers['x-user-id'] as string });
       res.json({ message: "Follow location task started" });
     } catch (error: any) {
       const status = error.status || 500;
@@ -651,7 +661,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "DM template is required" });
       }
       
-      await executeAction("send-dms", { template, target_type, amount });
+      await executeAction("send-dms", { template, target_type, amount }, { 'X-User-ID': req.headers['x-user-id'] as string });
       res.json({ message: `Send DMs to ${target_type} task started` });
     } catch (error: any) {
       const status = error.status || 500;
@@ -662,7 +672,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/actions/view-followers-stories", requireValidSession, async (req, res) => {
     try {
-      await executeAction("view-stories", { type: "followers" });
+      await executeAction("view-stories", { type: "followers" }, { 'X-User-ID': req.headers['x-user-id'] as string });
       res.json({ message: "View followers stories task started" });
     } catch (error: any) {
       const status = error.status || 500;
@@ -673,7 +683,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/actions/view-following-stories", requireValidSession, async (req, res) => {
     try {
-      await executeAction("view-stories", { type: "following" });
+      await executeAction("view-stories", { type: "following" }, { 'X-User-ID': req.headers['x-user-id'] as string });
       res.json({ message: "View following stories task started" });
     } catch (error: any) {
       const status = error.status || 500;

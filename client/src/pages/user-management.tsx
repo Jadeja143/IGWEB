@@ -183,7 +183,7 @@ export default function UserManagement() {
             <Users className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{users.length}</div>
+            <div className="text-2xl font-bold">{(users as User[]).length}</div>
           </CardContent>
         </Card>
         
@@ -194,7 +194,7 @@ export default function UserManagement() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {users.filter(u => u.status === "active").length}
+              {(users as User[]).filter((u: User) => u.status === "active").length}
             </div>
           </CardContent>
         </Card>
@@ -206,7 +206,7 @@ export default function UserManagement() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {users.filter(u => u.role === "admin").length}
+              {(users as User[]).filter((u: User) => u.role === "admin").length}
             </div>
           </CardContent>
         </Card>
@@ -218,7 +218,7 @@ export default function UserManagement() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {users.filter(u => u.status !== "active").length}
+              {(users as User[]).filter((u: User) => u.status !== "active").length}
             </div>
           </CardContent>
         </Card>

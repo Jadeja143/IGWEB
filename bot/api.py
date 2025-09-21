@@ -27,6 +27,7 @@ from modules.dm import DMModule
 from modules.location import LocationModule
 from core.controller import get_bot_controller
 from core.state import BotState
+from core.guards import require_valid_session
 
 # Logging setup
 logging.basicConfig(
@@ -323,8 +324,209 @@ def test_connection():
         log.exception("Error testing connection: %s", e)
         return jsonify({"error": str(e), "success": False}), 500
 
+# Session validation endpoints
+@app.route('/api/session/test', methods=['POST'])
+def test_session():
+    """Test Instagram session and update user_bot_status table"""
+    # Initialize user_id to avoid unbound variable issues
+    user_id: Optional[str] = None
+    
+    try:
+        # Import session helper functions from main.py
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from main import get_user_id_from_request, update_user_session_validity
+        
+        # Get user ID from request
+        
+        # Try X-User-ID header first
+        if request.headers.get('X-User-ID'):
+            user_id = request.headers.get('X-User-ID')
+        else:
+            # Fallback to helper function
+            user_id = get_user_id_from_request()
+        
+        if not user_id:
+            return jsonify({
+                "success": False,
+                "error": "E-SESSION-REQUIRED",
+                "message": "User ID required for session testing",
+                "requires_session_test": True
+            }), 401
+        
+        log.info("Testing Instagram session for user: %s", user_id)
+        
+        # Test the actual Instagram connection
+        result = g.bot.test_connection()
+        
+        if result.get("success"):
+            # Get Instagram username if available
+            instagram_username = None
+            try:
+                user_info = g.bot.get_user_info()
+                instagram_username = user_info.get('username') if user_info else None
+            except Exception:
+                pass
+            
+            # Update user_bot_status with successful validation
+            update_success = update_user_session_validity(
+                user_id=user_id,
+                is_valid=True,
+                error_code=None,
+                error_message=None,
+                instagram_username=instagram_username
+            )
+            
+            if not update_success:
+                log.warning("Failed to update session validity for user %s", user_id)
+            
+            return jsonify({
+                "success": True,
+                "message": "Instagram session is valid",
+                "instagram_username": instagram_username,
+                "session_tested_at": "now"
+            }), 200
+            
+        else:
+            # Update user_bot_status with failed validation
+            error_message = result.get("error", "Instagram connection test failed")
+            update_user_session_validity(
+                user_id=user_id,
+                is_valid=False,
+                error_code="E-SESSION-TEST-FAILED",
+                error_message=error_message
+            )
+            
+            return jsonify({
+                "success": False,
+                "error": "E-SESSION-TEST-FAILED",
+                "message": error_message,
+                "requires_session_test": True
+            }), 401
+        
+    except Exception as e:
+        log.exception("Error in session test endpoint: %s", e)
+        
+        # Try to update status as failed if we have user_id
+        try:
+            if user_id:  # user_id is properly initialized at function start
+                from main import update_user_session_validity
+                update_user_session_validity(
+                    user_id=user_id,
+                    is_valid=False,
+                    error_code="E-SESSION-TEST-ERROR",
+                    error_message=f"Session test error: {str(e)}"
+                )
+        except Exception:
+            pass
+        
+        return jsonify({
+            "success": False,
+            "error": "E-SESSION-TEST-ERROR",
+            "message": "Session test failed due to internal error",
+            "requires_session_test": True
+        }), 500
+
+@app.route('/api/session/status', methods=['GET'])
+def get_session_status():
+    """Get current session status from user_bot_status table"""
+    # Initialize user_id to avoid unbound variable issues
+    user_id: Optional[str] = None
+    
+    try:
+        # Import session helper functions from main.py
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from main import get_user_id_from_request, get_db_connection
+        
+        # Get user ID from request
+        
+        # Try X-User-ID header first
+        if request.headers.get('X-User-ID'):
+            user_id = request.headers.get('X-User-ID')
+        else:
+            # Fallback to helper function
+            user_id = get_user_id_from_request()
+        
+        if not user_id:
+            return jsonify({
+                "success": False,
+                "error": "E-SESSION-REQUIRED",
+                "message": "User ID required for session status",
+                "session_valid": False,
+                "requires_session_test": True
+            }), 401
+        
+        # Get session status from database
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({
+                "success": False,
+                "error": "E-SESSION-DB-ERROR",
+                "message": "Database connection failed",
+                "session_valid": False,
+                "requires_session_test": True
+            }), 500
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT session_valid, last_tested, last_error_code, last_error_message, 
+                       instagram_username, bot_running
+                FROM user_bot_status 
+                WHERE user_id = %s
+            """, (user_id,))
+            
+            result = cursor.fetchone()
+            
+            if not result:
+                return jsonify({
+                    "success": False,
+                    "error": "E-SESSION-NOT-FOUND",
+                    "message": "No session status found for user",
+                    "session_valid": False,
+                    "requires_session_test": True
+                }), 404
+            
+            session_valid, last_tested, last_error_code, last_error_message, instagram_username, bot_running = result
+            
+            # Check if session was tested recently (within last 24 hours)
+            session_expired = False
+            if last_tested:
+                import datetime
+                time_diff = datetime.datetime.now() - last_tested
+                session_expired = time_diff.total_seconds() > 86400  # 24 hours
+            
+            return jsonify({
+                "success": True,
+                "session_valid": session_valid and not session_expired,
+                "bot_running": bot_running,
+                "instagram_username": instagram_username,
+                "last_tested": last_tested.isoformat() if last_tested else None,
+                "last_error_code": last_error_code,
+                "last_error_message": last_error_message,
+                "session_expired": session_expired,
+                "requires_session_test": not session_valid or session_expired
+            }), 200
+            
+        finally:
+            conn.close()
+        
+    except Exception as e:
+        log.exception("Error in session status endpoint: %s", e)
+        return jsonify({
+            "success": False,
+            "error": "E-SESSION-STATUS-ERROR",
+            "message": "Failed to get session status",
+            "session_valid": False,
+            "requires_session_test": True
+        }), 500
+
 # Automation endpoints
 @app.route('/actions/like-followers', methods=['POST'])
+@require_valid_session
 def like_followers():
     """Like followers' posts"""
     try:
@@ -354,6 +556,7 @@ def like_followers():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/actions/like-following', methods=['POST'])
+@require_valid_session
 def like_following():
     """Like following users' posts"""
     try:
@@ -383,6 +586,7 @@ def like_following():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/actions/like-hashtag', methods=['POST'])
+@require_valid_session
 def like_hashtag():
     """Like posts by hashtag"""
     try:
@@ -417,6 +621,7 @@ def like_hashtag():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/actions/follow-hashtag', methods=['POST'])
+@require_valid_session
 def follow_hashtag():
     """Follow users by hashtag"""
     try:
@@ -451,6 +656,7 @@ def follow_hashtag():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/actions/follow-location', methods=['POST'])
+@require_valid_session
 def follow_location():
     """Follow users by location"""
     try:
@@ -485,6 +691,7 @@ def follow_location():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/actions/like-location', methods=['POST'])
+@require_valid_session
 def like_location():
     """Like posts by location"""
     try:
@@ -519,6 +726,7 @@ def like_location():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/actions/view-followers-stories', methods=['POST'])
+@require_valid_session
 def view_followers_stories():
     """View followers' stories"""
     try:
@@ -548,6 +756,7 @@ def view_followers_stories():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/actions/view-following-stories', methods=['POST'])
+@require_valid_session
 def view_following_stories():
     """View following stories"""
     try:
@@ -577,6 +786,7 @@ def view_following_stories():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/actions/send-dms', methods=['POST'])
+@require_valid_session
 def send_dms():
     """Send DMs to users"""
     try:

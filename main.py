@@ -39,41 +39,48 @@ def get_db_connection():
 
 # Session validation helper functions
 def check_user_session_validity(user_id):
-    """Check if user has valid Instagram session"""
+    """SECURITY CRITICAL: Check if user has valid Instagram session AND bot_running flag is true"""
     conn = get_db_connection()
     if not conn:
-        return False, "Database connection failed"
+        return False, "E-SESSION-DB-ERROR: Database connection failed"
     
     try:
         cursor = conn.cursor()
-        # Check if user bot status exists and session is valid
+        # SECURITY: Check BOTH session_valid AND bot_running flags
         cursor.execute("""
-            SELECT session_valid, last_tested, last_error_message, instagram_username
+            SELECT session_valid, last_tested, last_error_message, instagram_username, bot_running
             FROM user_bot_status 
             WHERE user_id = %s
         """, (user_id,))
         
         result = cursor.fetchone()
         if not result:
-            return False, "No session status found for user"
+            return False, "E-SESSION-NOT-FOUND: No session status found for user"
         
-        session_valid, last_tested, last_error_message, instagram_username = result
+        session_valid, last_tested, last_error_message, instagram_username, bot_running = result
         
+        # SECURITY: Check session_valid flag first
         if not session_valid:
             error_msg = last_error_message or "Session is invalid"
-            return False, f"Instagram session invalid: {error_msg}"
+            return False, f"E-SESSION-INVALID: Instagram session invalid: {error_msg}"
+        
+        # SECURITY: Check bot_running flag - automation MUST be disabled if bot_running=false
+        if not bot_running:
+            return False, "E-SESSION-BOT-STOPPED: Bot automation is disabled for this user"
         
         # Check if session was tested recently (within last 24 hours)
         if last_tested:
             import datetime
             time_diff = datetime.datetime.now() - last_tested
             if time_diff.total_seconds() > 86400:  # 24 hours
-                return False, "Session not tested recently - please test connection"
+                return False, "E-SESSION-EXPIRED: Session not tested recently - please test connection"
+        else:
+            return False, "E-SESSION-NEVER-TESTED: Session has never been tested"
         
         return True, f"Session valid for {instagram_username or 'user'}"
         
     except Exception as e:
-        return False, f"Error checking session: {str(e)}"
+        return False, f"E-SESSION-DB-ERROR: Error checking session: {str(e)}"
     finally:
         if conn:
             conn.close()
@@ -119,70 +126,45 @@ def update_user_session_validity(user_id, is_valid, error_code=None, error_messa
             conn.close()
 
 def get_user_id_from_request():
-    """Extract user ID from request headers or create a default user if none exists"""
+    """SECURITY CRITICAL: Extract user ID from request headers - NO FALLBACK TO DEFAULT USER"""
     import re
     
-    # Try to get user ID from X-User-ID header first
+    # SECURITY: ONLY accept explicit X-User-ID header - no fallbacks allowed
     user_id = request.headers.get('X-User-ID')
     client_ip = request.environ.get('REMOTE_ADDR', 'unknown')
     
-    if user_id:
-        # Enhanced validation: check format and existence
-        if not re.match(r'^[a-zA-Z0-9\-_]{1,36}$', user_id):
-            print(f"[SECURITY WARNING] Invalid user ID format from IP {client_ip}: {user_id}")
-            user_id = None  # Treat as invalid, fallback to default user
-        else:
-            # Validate that the user exists in the database
-            conn = get_db_connection()
-            if conn:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
-                    if cursor.fetchone():
-                        return user_id
-                except Exception as e:
-                    print(f"Error validating user ID: {e}")
-                finally:
-                    conn.close()
+    if not user_id:
+        # SECURITY: Fail immediately if no X-User-ID header provided
+        print(f"[SECURITY CRITICAL] No X-User-ID header provided from IP {client_ip}")
+        raise Exception("E-SESSION-REQUIRED: X-User-ID header is required")
     
-    # If no valid user ID found, try to get/create a default user
+    # Enhanced validation: check format and existence
+    if not re.match(r'^[a-zA-Z0-9\-_]{1,36}$', user_id):
+        print(f"[SECURITY CRITICAL] Invalid user ID format from IP {client_ip}: {user_id}")
+        raise Exception("E-SESSION-INVALID: Invalid user ID format")
+    
+    # Validate that the user exists in the database
     conn = get_db_connection()
     if not conn:
-        raise Exception("Database connection failed - cannot identify user")
+        print(f"[SECURITY CRITICAL] Database connection failed for user validation from IP {client_ip}")
+        raise Exception("E-SESSION-DB-ERROR: Database connection failed")
     
     try:
         cursor = conn.cursor()
-        
-        # Try to find an existing default user
-        cursor.execute("SELECT id FROM users WHERE username = %s LIMIT 1", ('default_user',))
-        result = cursor.fetchone()
-        
-        if result:
-            return result[0]
+        cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+        if cursor.fetchone():
+            # User exists and is valid
+            return user_id
         else:
-            # Create a default user if none exists
-            import hashlib
-            import secrets
-            # Generate a strong random password and hash it properly
-            random_password = secrets.token_urlsafe(32)
-            password_hash = hashlib.sha256(random_password.encode()).hexdigest()
-            cursor.execute("""
-                INSERT INTO users (username, password) 
-                VALUES (%s, %s) 
-                RETURNING id
-            """, ('default_user', password_hash))
-            result = cursor.fetchone()
-            conn.commit()
-            
-            if result:
-                print(f"Created default user with ID: {result[0]}")
-                return result[0]
-            else:
-                raise Exception("Failed to create default user")
-                
+            print(f"[SECURITY CRITICAL] User ID not found in database from IP {client_ip}: {user_id}")
+            raise Exception("E-SESSION-INVALID: User not found")
     except Exception as e:
-        print(f"Error managing user identification: {e}")
-        raise Exception(f"Cannot identify user: {str(e)}")
+        if str(e).startswith("E-SESSION-"):
+            # Re-raise security exceptions without modification
+            raise
+        else:
+            print(f"[SECURITY ERROR] Database error validating user ID from IP {client_ip}: {e}")
+            raise Exception("E-SESSION-DB-ERROR: Database validation failed")
     finally:
         conn.close()
 
@@ -201,7 +183,7 @@ def require_valid_session(f):
             if not is_valid:
                 return jsonify({
                     "success": False,
-                    "error": "Session validation failed",
+                    "error": "E-SESSION-INVALID",
                     "message": message,
                     "requires_session_test": True
                 }), 401
@@ -212,7 +194,7 @@ def require_valid_session(f):
         except Exception as e:
             return jsonify({
                 "success": False,
-                "error": "Session validation error",
+                "error": "E-SESSION-VALIDATION-ERROR",
                 "message": str(e)
             }), 500
     
@@ -394,7 +376,8 @@ class SimplifiedUserBotInstance:
             if not self.session_valid:
                 return {
                     "success": False,
-                    "error": "Session not valid - please login first",
+                    "error": "E-SESSION-INVALID",
+                    "message": "Session not valid - please login first",
                     "user_id": self.user_id
                 }
             

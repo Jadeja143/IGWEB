@@ -1,8 +1,22 @@
 import functools
 import logging
-from typing import Callable, Any, Dict
+import sys
+import os
+from typing import Callable, Any, Dict, Tuple
+from flask import request, g
 from .controller import get_bot_controller
 from .state import BotState
+
+# Import session helper functions from main.py
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+try:
+    from main import check_user_session_validity, get_user_id_from_request
+except ImportError:
+    # Fallback if import fails
+    def check_user_session_validity(user_id: str) -> Tuple[bool, str]:
+        return False, "Session validation not available"
+    def get_user_id_from_request() -> str:
+        return ""
 
 log = logging.getLogger(__name__)
 
@@ -164,19 +178,91 @@ def rate_limit_action(action_type: str, max_per_hour: int = 60):
     return decorator
 
 
+def require_valid_session(func: Callable) -> Callable:
+    """
+    SECURITY CRITICAL: Decorator that ensures user has valid Instagram session before executing automation.
+    Blocks all automation if session_valid=false or bot_running=false.
+    Fails closed on database errors.
+    Returns structured error codes (E-SESSION-REQUIRED format).
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs) -> Dict[str, Any]:
+        try:
+            # SECURITY: Get user_id from request - fail closed if not available
+            user_id = None
+            
+            # Try to get user_id from X-User-ID header first
+            if hasattr(request, 'headers') and request.headers:
+                user_id = request.headers.get('X-User-ID')
+            
+            # Fallback: try Flask g object if set by middleware
+            if not user_id and hasattr(g, 'user') and g.user:
+                user_id = g.user.get('id')
+            
+            # Fallback: use helper function from main.py
+            if not user_id:
+                user_id = get_user_id_from_request()
+            
+            if not user_id:
+                log.warning(
+                    "Session validation failed: No user ID available for %s", 
+                    func.__name__
+                )
+                return {
+                    "success": False,
+                    "error": "E-SESSION-REQUIRED",
+                    "message": "User ID required for bot actions",
+                    "requires_session_test": True
+                }
+            
+            # SECURITY: Check user session validity using main.py helper
+            is_valid, error_message = check_user_session_validity(user_id)
+            
+            if not is_valid:
+                log.warning(
+                    "Session validation failed for user %s in %s: %s", 
+                    user_id, func.__name__, error_message
+                )
+                return {
+                    "success": False,
+                    "error": "E-SESSION-INVALID",
+                    "message": error_message or "Instagram session is invalid",
+                    "requires_session_test": True
+                }
+            
+            # Session is valid - execute the function
+            log.debug("Session validation passed for user %s in %s", user_id, func.__name__)
+            return func(*args, **kwargs)
+            
+        except Exception as e:
+            # SECURITY: Fail closed on any errors
+            log.error("Session validation error in %s: %s", func.__name__, e)
+            return {
+                "success": False,
+                "error": "E-SESSION-VALIDATION-ERROR",
+                "message": "Session validation failed due to internal error",
+                "requires_session_test": True
+            }
+    
+    return wrapper
+
+
 # Combined decorator for full protection
 def secure_automation_action(action_type: str, max_per_hour: int = 60):
     """
     Combined decorator that applies all security measures:
+    - Requires valid session first
     - Requires running state
     - Logs actions for audit
     - Applies rate limiting
     """
     def decorator(func: Callable) -> Callable:
         # Apply decorators in reverse order (inside-out)
+        # Session validation is the outermost layer (most critical)
         protected_func = require_running(func)
         protected_func = log_automation_action(action_type)(protected_func)
         protected_func = rate_limit_action(action_type, max_per_hour)(protected_func)
+        protected_func = require_valid_session(protected_func)
         return protected_func
     
     return decorator

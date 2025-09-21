@@ -191,7 +191,8 @@ class BotInstance:
                 if not self.initialized or not self.session_valid:
                     return {
                         "success": False,
-                        "error": "Bot not initialized or session invalid",
+                        "error": "E-SESSION-INVALID",
+                        "message": "Bot not initialized or session invalid",
                         "user_id": self.user_id
                     }
                 
@@ -309,7 +310,8 @@ class BotInstance:
                 if not self.initialized or not self.session_valid:
                     return {
                         "success": False,
-                        "error": "Bot not initialized or session invalid",
+                        "error": "E-SESSION-INVALID",
+                        "message": "Bot not initialized or session invalid",
                         "user_id": self.user_id
                     }
                 

@@ -21,7 +21,7 @@ class BotApiError extends Error {
   }
 }
 
-export async function callBotApi(endpoint: string, method: "GET" | "POST" = "GET", data?: any, retries: number = 2): Promise<BotApiResponse> {
+export async function callBotApi(endpoint: string, method: "GET" | "POST" = "GET", data?: any, retries: number = 2, headers?: Record<string, string>): Promise<BotApiResponse> {
   const maxRetries = retries;
   let lastError: Error = new BotApiError("Unknown error", 500);
 
@@ -35,6 +35,8 @@ export async function callBotApi(endpoint: string, method: "GET" | "POST" = "GET
         method,
         headers: {
           "Content-Type": "application/json",
+          // Forward any additional headers (especially X-User-ID)
+          ...headers,
         },
         signal: controller.signal,
       };
@@ -118,9 +120,9 @@ export async function triggerBotLogin(credentials: { username: string; password:
   return await callBotApi("/api/bot/login", "POST", credentials);
 }
 
-export async function executeAction(action: string, data?: any): Promise<void> {
+export async function executeAction(action: string, data?: any, headers?: Record<string, string>): Promise<void> {
   try {
-    const response = await callBotApi(`/actions/${action}`, "POST", data);
+    const response = await callBotApi(`/actions/${action}`, "POST", data, 2, headers);
     
     // Log successful action (best-effort, don't fail the action if logging fails)
     try {
