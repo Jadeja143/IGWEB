@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertHashtagSchema, insertLocationSchema, insertDMTemplateSchema, updateDailyLimitsSchema } from "@shared/schema";
+import { insertHashtagSchema, insertLocationSchema, insertDMTemplateSchema, updateDailyLimitsSchema, insertInstagramCredentialsSchema } from "@shared/schema";
 import { getBotStatus, executeAction } from "./botApi";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -11,11 +11,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const botStatus = await getBotStatus();
       const storageStatus = await storage.getBotStatus();
       
+      // Check for credentials in database instead of environment variables
+      const hasCredentials = await storage.getInstagramCredentials();
+      
       // Enhance status with additional validation info
       const combinedStatus = { 
         ...storageStatus, 
         ...botStatus,
-        credentials_configured: !!(process.env.IG_USERNAME && process.env.IG_PASSWORD),
+        credentials_configured: !!hasCredentials,
+        credentials_username: hasCredentials?.username || null,
         bot_api_accessible: true // If we got a response, the API is accessible
       };
       
@@ -23,13 +27,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Bot status error:", error);
       
+      // Check for credentials in database for fallback status
+      const hasCredentials = await storage.getInstagramCredentials();
+      
       // If bot API is not accessible, provide fallback status
       const fallbackStatus = {
         initialized: false,
         running: false,
         instagram_connected: false,
         modules_loaded: false,
-        credentials_configured: !!(process.env.IG_USERNAME && process.env.IG_PASSWORD),
+        credentials_configured: !!hasCredentials,
+        credentials_username: hasCredentials?.username || null,
         bot_api_accessible: false,
         error: error.message || "Bot API not accessible"
       };
@@ -275,6 +283,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(logs);
     } catch (error) {
       res.status(500).json({ message: "Failed to get activity logs" });
+    }
+  });
+
+  // Instagram credentials routes
+  app.get("/api/instagram/credentials", async (req, res) => {
+    try {
+      const credentials = await storage.getInstagramCredentials();
+      if (credentials) {
+        // Return credentials without the actual password for security
+        const safeCredentials = {
+          id: credentials.id,
+          username: credentials.username,
+          is_active: credentials.is_active,
+          last_login_attempt: credentials.last_login_attempt,
+          login_successful: credentials.login_successful,
+          created_at: credentials.created_at,
+          updated_at: credentials.updated_at
+        };
+        res.json(safeCredentials);
+      } else {
+        res.status(404).json({ message: "No Instagram credentials found" });
+      }
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get Instagram credentials" });
+    }
+  });
+
+  app.post("/api/instagram/credentials", async (req, res) => {
+    try {
+      const validatedCredentials = insertInstagramCredentialsSchema.parse(req.body);
+      const credentials = await storage.saveInstagramCredentials(validatedCredentials);
+      
+      // Return credentials without the actual password for security
+      const safeCredentials = {
+        id: credentials.id,
+        username: credentials.username,
+        is_active: credentials.is_active,
+        last_login_attempt: credentials.last_login_attempt,
+        login_successful: credentials.login_successful,
+        created_at: credentials.created_at,
+        updated_at: credentials.updated_at
+      };
+      
+      res.json(safeCredentials);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        res.status(400).json({ message: "Invalid credentials format", errors: error.errors });
+      } else {
+        res.status(500).json({ message: "Failed to save Instagram credentials" });
+      }
+    }
+  });
+
+  app.post("/api/instagram/credentials/test", async (req, res) => {
+    try {
+      const validatedCredentials = insertInstagramCredentialsSchema.parse(req.body);
+      const result = await storage.testInstagramConnection(validatedCredentials);
+      res.json(result);
+    } catch (error: any) {
+      if (error.name === 'ZodError') {
+        res.status(400).json({ message: "Invalid credentials format", errors: error.errors });
+      } else {
+        res.status(500).json({ message: "Failed to test Instagram connection" });
+      }
+    }
+  });
+
+  app.delete("/api/instagram/credentials", async (req, res) => {
+    try {
+      const success = await storage.deleteInstagramCredentials();
+      if (success) {
+        res.json({ message: "Instagram credentials deleted successfully" });
+      } else {
+        res.status(404).json({ message: "No Instagram credentials found to delete" });
+      }
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete Instagram credentials" });
     }
   });
 

@@ -29,12 +29,24 @@ export default function Settings() {
     maxWaitDays: 14,
   });
 
+  const [instagramCredentials, setInstagramCredentials] = useState({
+    username: "",
+    password: "",
+  });
+
+  const [showPasswordField, setShowPasswordField] = useState(false);
+
   const { data: dailyLimits } = useQuery<DailyLimits>({
     queryKey: ["/api/limits"],
   });
 
   const { data: botStatus } = useQuery<BotStatus>({
     queryKey: ["/api/bot/status"],
+  });
+
+  const { data: existingCredentials } = useQuery<{ username: string; id: string }>({
+    queryKey: ["/api/instagram/credentials"],
+    retry: false,
   });
 
   useEffect(() => {
@@ -89,6 +101,50 @@ export default function Settings() {
     },
   });
 
+  const saveCredentialsMutation = useMutation({
+    mutationFn: async (credentials: { username: string; password: string }) => {
+      return await apiRequest("POST", "/api/instagram/credentials", credentials);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/instagram/credentials"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
+      setInstagramCredentials({ username: "", password: "" });
+      setShowPasswordField(false);
+      toast({
+        title: "Success",
+        description: "Instagram credentials saved securely",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to save credentials",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const testCredentialsMutation = useMutation({
+    mutationFn: async (credentials: { username: string; password: string }) => {
+      const response = await apiRequest("POST", "/api/instagram/credentials/test", credentials);
+      return response as { success: boolean; message: string };
+    },
+    onSuccess: (data) => {
+      toast({
+        title: data.success ? "Success" : "Error",
+        description: data.message,
+        variant: data.success ? "default" : "destructive",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to test credentials",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleUpdateLimits = () => {
     updateLimitsMutation.mutate(limits);
   };
@@ -98,6 +154,30 @@ export default function Settings() {
       bot_running: false,
       instagram_connected: false,
     });
+  };
+
+  const handleSaveCredentials = () => {
+    if (!instagramCredentials.username || !instagramCredentials.password) {
+      toast({
+        title: "Error",
+        description: "Please enter both username and password",
+        variant: "destructive",
+      });
+      return;
+    }
+    saveCredentialsMutation.mutate(instagramCredentials);
+  };
+
+  const handleTestCredentials = () => {
+    if (!instagramCredentials.username || !instagramCredentials.password) {
+      toast({
+        title: "Error",
+        description: "Please enter both username and password",
+        variant: "destructive",
+      });
+      return;
+    }
+    testCredentialsMutation.mutate(instagramCredentials);
   };
 
   const handleResetData = () => {
@@ -121,40 +201,94 @@ export default function Settings() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div>
-                <Label htmlFor="instagram-username">Username</Label>
-                <Input
-                  id="instagram-username"
-                  placeholder="your_username"
-                  disabled
-                  data-testid="input-instagram-username"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Configure via environment variables
-                </p>
-              </div>
-              <div>
-                <Label htmlFor="instagram-password">Password</Label>
-                <Input
-                  id="instagram-password"
-                  type="password"
-                  placeholder="••••••••"
-                  disabled
-                  data-testid="input-instagram-password"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Configure via environment variables
-                </p>
-              </div>
+              {/* Show existing credentials info if available */}
+              {existingCredentials?.username && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <p className="font-medium text-green-800">Current Account: @{existingCredentials.username}</p>
+                  <p className="text-xs text-green-600">Credentials are securely stored</p>
+                </div>
+              )}
+
+              {/* Toggle to show credential input form */}
+              {!showPasswordField ? (
+                <div className="text-center">
+                  <Button
+                    onClick={() => setShowPasswordField(true)}
+                    variant="outline"
+                    data-testid="button-setup-instagram"
+                  >
+                    {existingCredentials ? "Update Instagram Account" : "Setup Instagram Account"}
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
+                  <div>
+                    <Label htmlFor="instagram-username">Instagram Username</Label>
+                    <Input
+                      id="instagram-username"
+                      placeholder="your_username"
+                      value={instagramCredentials.username}
+                      onChange={(e) => setInstagramCredentials(prev => ({ ...prev, username: e.target.value }))}
+                      data-testid="input-instagram-username"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="instagram-password">Instagram Password</Label>
+                    <Input
+                      id="instagram-password"
+                      type="password"
+                      placeholder="Enter your password"
+                      value={instagramCredentials.password}
+                      onChange={(e) => setInstagramCredentials(prev => ({ ...prev, password: e.target.value }))}
+                      data-testid="input-instagram-password"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Your password is encrypted and stored securely
+                    </p>
+                  </div>
+                  <div className="flex space-x-2">
+                    <Button
+                      onClick={handleTestCredentials}
+                      disabled={testCredentialsMutation.isPending || !instagramCredentials.username || !instagramCredentials.password}
+                      variant="outline"
+                      data-testid="button-test-credentials"
+                    >
+                      Test Connection
+                    </Button>
+                    <Button
+                      onClick={handleSaveCredentials}
+                      disabled={saveCredentialsMutation.isPending || !instagramCredentials.username || !instagramCredentials.password}
+                      data-testid="button-save-credentials"
+                    >
+                      Save Credentials
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setShowPasswordField(false);
+                        setInstagramCredentials({ username: "", password: "" });
+                      }}
+                      variant="ghost"
+                      data-testid="button-cancel-credentials"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
                 <div>
                   <p className="font-medium">Connection Status</p>
                   <p className="text-sm text-muted-foreground">
                     {botStatus?.instagram_connected ? "Connected" : "Disconnected"}
+                    {botStatus?.credentials_username && (
+                      <span className="ml-2 text-green-600">@{botStatus.credentials_username}</span>
+                    )}
                   </p>
                 </div>
                 <div className={`w-3 h-3 rounded-full ${
-                  botStatus?.instagram_connected ? "bg-green-500" : "bg-red-500"
+                  botStatus?.instagram_connected ? "bg-green-500" : 
+                  botStatus?.credentials_configured ? "bg-yellow-500" : "bg-red-500"
                 }`} />
               </div>
             </div>

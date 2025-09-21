@@ -11,9 +11,11 @@ import {
   type InsertHashtag,
   type InsertLocation,
   type InsertDMTemplate,
-  type UpdateDailyLimits
+  type UpdateDailyLimits,
+  type InsertInstagramCredentials,
+  type InstagramCredentials
 } from "@shared/schema";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash, pbkdf2Sync } from "crypto";
 
 export interface IStorage {
   // User management
@@ -52,6 +54,12 @@ export interface IStorage {
   // Activity logs
   getActivityLogs(limit?: number): Promise<ActivityLog[]>;
   addActivityLog(log: { action: string; details?: string; status: string }): Promise<ActivityLog>;
+
+  // Instagram credentials
+  getInstagramCredentials(): Promise<InstagramCredentials | undefined>;
+  saveInstagramCredentials(credentials: InsertInstagramCredentials): Promise<InstagramCredentials>;
+  deleteInstagramCredentials(): Promise<boolean>;
+  testInstagramConnection(credentials: InsertInstagramCredentials): Promise<{ success: boolean; message: string; }>;
 }
 
 export class MemStorage implements IStorage {
@@ -63,6 +71,7 @@ export class MemStorage implements IStorage {
   private locations: Map<string, Location>;
   private dmTemplates: Map<string, DMTemplate>;
   private activityLogs: ActivityLog[];
+  private instagramCredentials: InstagramCredentials | undefined;
 
   constructor() {
     this.users = new Map();
@@ -90,6 +99,9 @@ export class MemStorage implements IStorage {
       dms_limit: 10,
       story_views_limit: 500,
     };
+
+    // Initialize Instagram credentials as undefined
+    this.instagramCredentials = undefined;
 
     // Add some default data
     this._initializeDefaults();
@@ -314,6 +326,103 @@ export class MemStorage implements IStorage {
     
     return newLog;
   }
+
+  // Encrypt password for storage
+  private encryptPassword(password: string): string {
+    const salt = "instagram_bot_salt"; // In production, use a proper random salt
+    return pbkdf2Sync(password, salt, 10000, 64, 'sha256').toString('hex');
+  }
+
+  // Decrypt password (for testing connections - in practice, store encrypted and pass encrypted to bot)
+  private decryptPassword(encryptedPassword: string, originalPassword: string): boolean {
+    const encrypted = this.encryptPassword(originalPassword);
+    return encrypted === encryptedPassword;
+  }
+
+  async getInstagramCredentials(): Promise<InstagramCredentials | undefined> {
+    return this.instagramCredentials;
+  }
+
+  async saveInstagramCredentials(credentials: InsertInstagramCredentials): Promise<InstagramCredentials> {
+    const encryptedCredentials: InstagramCredentials = {
+      id: randomUUID(),
+      username: credentials.username,
+      password: this.encryptPassword(credentials.password),
+      is_active: true,
+      last_login_attempt: null,
+      login_successful: false,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    
+    this.instagramCredentials = encryptedCredentials;
+    
+    // Add activity log
+    await this.addActivityLog({
+      action: "Instagram Credentials Updated",
+      details: `Updated Instagram credentials for username: ${credentials.username}`,
+      status: "success"
+    });
+    
+    return encryptedCredentials;
+  }
+
+  async deleteInstagramCredentials(): Promise<boolean> {
+    if (this.instagramCredentials) {
+      this.instagramCredentials = undefined;
+      await this.addActivityLog({
+        action: "Instagram Credentials Deleted",
+        details: "Instagram credentials have been removed",
+        status: "success"
+      });
+      return true;
+    }
+    return false;
+  }
+
+  async testInstagramConnection(credentials: InsertInstagramCredentials): Promise<{ success: boolean; message: string; }> {
+    // Basic validation
+    if (!credentials.username || !credentials.password) {
+      return {
+        success: false,
+        message: "Username and password are required"
+      };
+    }
+
+    if (credentials.username.length < 3) {
+      return {
+        success: false,
+        message: "Username must be at least 3 characters long"
+      };
+    }
+
+    if (credentials.password.length < 6) {
+      return {
+        success: false,
+        message: "Password must be at least 6 characters long"
+      };
+    }
+
+    // Here you would normally test the actual Instagram connection
+    // For now, we'll do basic validation and return success
+    // The real connection test will happen in the bot initialization
+    
+    await this.addActivityLog({
+      action: "Instagram Connection Test",
+      details: `Connection test for username: ${credentials.username}`,
+      status: "success"
+    });
+
+    return {
+      success: true,
+      message: "Credentials format is valid. Full connection will be tested during bot initialization."
+    };
+  }
 }
 
-export const storage = new MemStorage();
+// Export both implementations for flexibility
+export const memStorage = new MemStorage();
+
+// Use database storage by default for production
+import { DatabaseStorage } from "./dbStorage";
+export const storage = new DatabaseStorage();

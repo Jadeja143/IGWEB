@@ -67,6 +67,17 @@ export const activityLogs = pgTable("activity_logs", {
   timestamp: timestamp("timestamp").defaultNow(),
 });
 
+export const instagramCredentials = pgTable("instagram_credentials", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  username: text("username").notNull(),
+  password: text("password").notNull(), // This will be encrypted
+  is_active: boolean("is_active").default(true),
+  last_login_attempt: timestamp("last_login_attempt"),
+  login_successful: boolean("login_successful").default(false),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+
 // Schemas for validation
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
@@ -96,6 +107,11 @@ export const updateDailyLimitsSchema = createInsertSchema(dailyLimits).pick({
   story_views_limit: true,
 });
 
+export const insertInstagramCredentialsSchema = createInsertSchema(instagramCredentials).pick({
+  username: true,
+  password: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -111,3 +127,5 @@ export type InsertHashtag = z.infer<typeof insertHashtagSchema>;
 export type InsertLocation = z.infer<typeof insertLocationSchema>;
 export type InsertDMTemplate = z.infer<typeof insertDMTemplateSchema>;
 export type UpdateDailyLimits = z.infer<typeof updateDailyLimitsSchema>;
+export type InsertInstagramCredentials = z.infer<typeof insertInstagramCredentialsSchema>;
+export type InstagramCredentials = typeof instagramCredentials.$inferSelect;
