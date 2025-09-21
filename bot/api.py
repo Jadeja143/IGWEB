@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
 Instagram Bot API Server
-Flask API server to expose Instagram bot functionality to Node.js frontend
+Flask API server to expose Instagram bot functionality with secure authentication
+No credentials are stored - only session-based authentication
 """
 
 import os
 import sys
 import logging
 import json
+from typing import Optional, Dict, Any
 from flask import Flask, jsonify, request, g
 from flask_cors import CORS
 import threading
-import time
-from typing import Dict, Any
 
 # Add modules directory to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'modules'))
@@ -44,7 +44,7 @@ bot_instance = None
 bot_lock = threading.Lock()
 
 class InstagramBotAPI:
-    """Instagram Bot API Controller"""
+    """Secure Instagram Bot API Controller"""
     
     def __init__(self):
         self.auth = InstagramAuth()
@@ -56,131 +56,134 @@ class InstagramBotAPI:
         self.initialized = False
         self.running = False
         
-    def initialize(self) -> Dict[str, Any]:
-        """Initialize all bot components"""
+        # Initialize database
         try:
-            if self.initialized:
-                return {
-                    "success": True,
-                    "message": "Bot is already initialized",
-                    "instagram_connected": True,
-                    "initialized": True
-                }
-            
-            # Try to get credentials from database first, then environment variables
-            username = None
-            password = None
-            
-            # Try database first - call the decryption endpoint
-            try:
-                import requests
-                creds_response = requests.get("http://127.0.0.1:3000/api/instagram/credentials/decrypt", timeout=5)
-                if creds_response.status_code == 200:
-                    creds_data = creds_response.json()
-                    username = creds_data.get("username", "").strip()
-                    password = creds_data.get("password", "").strip()
-                    log.info("Found Instagram credentials in database for user: %s", username)
-                else:
-                    log.info("No Instagram credentials found in database")
-            except Exception as e:
-                log.warning("Could not check database for Instagram credentials: %s", e)
-            
-            # Fallback to environment variables if database credentials not found
-            if not username:
-                username = os.environ.get("IG_USERNAME", "").strip()
-                password = os.environ.get("IG_PASSWORD", "").strip()
-                if username and password:
-                    log.info("Using Instagram credentials from environment variables")
-            
-            if not username or not password:
-                log.error("Instagram credentials not configured")
-                return {
-                    "success": False,
-                    "error": "Instagram credentials not configured",
-                    "message": "Please configure Instagram credentials in the Settings page or set IG_USERNAME and IG_PASSWORD environment variables",
-                    "instagram_connected": False,
-                    "initialized": False,
-                    "credentials_missing": True
-                }
-            
-            if len(username) < 3:
-                log.error("Invalid username format: too short")
-                return {
-                    "success": False,
-                    "error": "Invalid username format", 
-                    "message": "Instagram username must be at least 3 characters long",
-                    "instagram_connected": False,
-                    "initialized": False
-                }
-                
-            if len(password) < 6:
-                log.error("Invalid password format: too short")
-                return {
-                    "success": False,
-                    "error": "Invalid password format",
-                    "message": "Instagram password must be at least 6 characters long", 
-                    "instagram_connected": False,
-                    "initialized": False
-                }
-            
-            # Initialize database
             init_database()
             log.info("Database initialized")
+        except Exception as e:
+            log.warning("Database initialization failed: %s", e)
+        
+    def login(self, username: str, password: str, verification_code: Optional[str] = None) -> Dict[str, Any]:
+        """Secure login endpoint - credentials are not stored"""
+        try:
+            # Perform secure login
+            result = self.auth.login(username, password, verification_code)
             
-            # Initialize Instagram authentication with better error reporting
-            log.info("Attempting Instagram login for user: %s", username)
-            if not self.auth.login(username, password):
-                log.error("Failed to login to Instagram for user: %s", username)
-                return {
-                    "success": False,
-                    "error": "Instagram login failed",
-                    "message": "Failed to login to Instagram. Please check your credentials and ensure your account is accessible. You may need to verify your account through the Instagram app.",
-                    "instagram_connected": False,
-                    "initialized": False,
-                    "login_failed": True
-                }
+            if result["success"]:
+                # Initialize modules after successful login
+                self._initialize_modules()
+                self.initialized = True
+                log.info("User authenticated and modules initialized")
+                
+            return result
             
-            # Initialize modules
-            log.info("Initializing bot modules...")
-            self.follow_module = FollowModule(self.auth)
-            self.like_module = LikeModule(self.auth)
-            self.story_module = StoryModule(self.auth)
-            self.dm_module = DMModule(self.auth)
-            self.location_module = LocationModule(self.auth)
+        except Exception as e:
+            log.exception("Login error: %s", e)
+            return {
+                "success": False,
+                "error": f"Login failed: {str(e)}",
+                "requires_verification": False
+            }
+    
+    def logout(self) -> Dict[str, Any]:
+        """Logout and cleanup"""
+        try:
+            self.auth.logout()
+            self.initialized = False
+            self.running = False
             
+            # Clear modules
+            self.follow_module = None
+            self.like_module = None
+            self.story_module = None
+            self.dm_module = None
+            self.location_module = None
             
-            self.initialized = True
-            self.running = True
-            log.info("Instagram bot initialized successfully for user: %s", username)
+            log.info("User logged out and session cleared")
             
             return {
                 "success": True,
-                "message": "Bot initialized successfully", 
-                "instagram_connected": True,
-                "initialized": True,
-                "modules_loaded": True,
-                "username": username
+                "message": "Logged out successfully"
             }
             
         except Exception as e:
-            log.exception("Failed to initialize bot: %s", e)
+            log.exception("Logout error: %s", e)
             return {
                 "success": False,
-                "error": str(e),
-                "message": f"Initialization failed: {str(e)}",
+                "error": f"Logout failed: {str(e)}"
+            }
+    
+    def initialize(self) -> Dict[str, Any]:
+        """Check if bot is initialized with authenticated session"""
+        try:
+            # Check if user is already authenticated with a valid session
+            if self.auth.is_logged_in():
+                if not self.initialized:
+                    # Initialize automation modules with authenticated session
+                    self._initialize_modules()
+                    self.initialized = True
+                
+                user_info = self.auth.get_user_info()
+                log.info("Bot is initialized with authenticated user: %s", user_info.get('username', 'unknown'))
+                
+                return {
+                    "success": True,
+                    "message": "Bot is initialized",
+                    "instagram_connected": True,
+                    "initialized": True,
+                    "user_info": user_info
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Authentication required",
+                    "message": "Please login with your Instagram credentials first",
+                    "instagram_connected": False,
+                    "initialized": False,
+                    "requires_login": True
+                }
+                
+        except Exception as e:
+            log.exception("Initialization check error: %s", e)
+            return {
+                "success": False,
+                "error": f"Initialization failed: {str(e)}",
                 "instagram_connected": False,
                 "initialized": False
             }
     
+    def _initialize_modules(self):
+        """Initialize all automation modules with authenticated session"""
+        try:
+            if not self.auth.is_logged_in():
+                raise Exception("Cannot initialize modules without authentication")
+            
+            self.follow_module = FollowModule(self.auth)
+            self.like_module = LikeModule(self.auth)  
+            self.story_module = StoryModule(self.auth)
+            self.dm_module = DMModule(self.auth)
+            self.location_module = LocationModule(self.auth)
+            
+            log.info("All automation modules initialized successfully")
+            
+        except Exception as e:
+            log.exception("Failed to initialize bot modules: %s", e)
+            raise Exception(f"Failed to initialize automation modules: {str(e)}")
     
+    def test_connection(self) -> Dict[str, Any]:
+        """Test Instagram connection"""
+        return self.auth.test_connection()
     
     def get_status(self) -> Dict[str, Any]:
         """Get bot status"""
+        user_info = self.auth.get_user_info() if self.auth.is_logged_in() else None
+        
         return {
             "initialized": self.initialized,
             "running": self.running,
             "instagram_connected": self.auth.is_logged_in() if self.auth else False,
-            "modules_loaded": bool(self.follow_module and self.like_module and self.story_module)
+            "modules_loaded": bool(self.follow_module and self.like_module and self.story_module),
+            "user_info": user_info
         }
 
 def get_bot() -> InstagramBotAPI:
@@ -214,26 +217,72 @@ def get_status():
 
 @app.route('/initialize', methods=['POST'])
 def initialize_bot():
-    """Initialize bot with Instagram login"""
+    """Check if bot is initialized"""
     try:
         result = g.bot.initialize()
-        return jsonify(result), 200 if result["success"] else 500
+        return jsonify(result), 200 if result["success"] else 401
     except Exception as e:
-        log.exception("Error initializing bot: %s", e)
+        log.exception("Error checking initialization: %s", e)
         return jsonify({"error": str(e), "success": False}), 500
 
+@app.route('/login', methods=['POST'])
+def login():
+    """Secure login endpoint"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request data required", "success": False}), 400
+        
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        verification_code = data.get('verification_code', '').strip() or None
+        
+        if not username or not password:
+            return jsonify({
+                "error": "Username and password are required",
+                "success": False
+            }), 400
+        
+        result = g.bot.login(username, password, verification_code)
+        status_code = 200 if result["success"] else (401 if result.get("requires_verification") else 400)
+        
+        return jsonify(result), status_code
+        
+    except Exception as e:
+        log.exception("Error in login endpoint: %s", e)
+        return jsonify({"error": str(e), "success": False}), 500
 
+@app.route('/logout', methods=['POST'])
+def logout():
+    """Logout endpoint"""
+    try:
+        result = g.bot.logout()
+        return jsonify(result), 200 if result["success"] else 500
+    except Exception as e:
+        log.exception("Error in logout endpoint: %s", e)
+        return jsonify({"error": str(e), "success": False}), 500
+
+@app.route('/test-connection', methods=['POST'])
+def test_connection():
+    """Test Instagram connection"""
+    try:
+        result = g.bot.test_connection()
+        return jsonify(result), 200 if result["success"] else 401
+    except Exception as e:
+        log.exception("Error testing connection: %s", e)
+        return jsonify({"error": str(e), "success": False}), 500
+
+# Automation endpoints
 @app.route('/actions/like-followers', methods=['POST'])
 def like_followers():
     """Like followers' posts"""
     try:
         if not g.bot.initialized or not g.bot.like_module:
-            return jsonify({"error": "Bot not initialized"}), 503
+            return jsonify({"error": "Bot not initialized or not authenticated"}), 401
         
         data = request.get_json() or {}
         likes_per_user = data.get('likes_per_user', 2)
         
-        # Run in background thread to avoid blocking
         def run_task():
             try:
                 result = g.bot.like_module.like_followers_posts(likes_per_user=likes_per_user)
@@ -258,7 +307,7 @@ def like_following():
     """Like following users' posts"""
     try:
         if not g.bot.initialized or not g.bot.like_module:
-            return jsonify({"error": "Bot not initialized"}), 503
+            return jsonify({"error": "Bot not initialized or not authenticated"}), 401
         
         data = request.get_json() or {}
         likes_per_user = data.get('likes_per_user', 2)
@@ -287,7 +336,7 @@ def like_hashtag():
     """Like posts by hashtag"""
     try:
         if not g.bot.initialized or not g.bot.like_module:
-            return jsonify({"error": "Bot not initialized"}), 503
+            return jsonify({"error": "Bot not initialized or not authenticated"}), 401
         
         data = request.get_json() or {}
         hashtag = data.get('hashtag')
@@ -321,7 +370,7 @@ def follow_hashtag():
     """Follow users by hashtag"""
     try:
         if not g.bot.initialized or not g.bot.follow_module:
-            return jsonify({"error": "Bot not initialized"}), 503
+            return jsonify({"error": "Bot not initialized or not authenticated"}), 401
         
         data = request.get_json() or {}
         hashtag = data.get('hashtag')
@@ -355,18 +404,18 @@ def follow_location():
     """Follow users by location"""
     try:
         if not g.bot.initialized or not g.bot.follow_module:
-            return jsonify({"error": "Bot not initialized"}), 503
+            return jsonify({"error": "Bot not initialized or not authenticated"}), 401
         
         data = request.get_json() or {}
-        location_pk = data.get('location_pk')
+        location = data.get('location')
         amount = data.get('amount', 20)
         
-        if not location_pk:
-            return jsonify({"error": "Location PK is required"}), 400
+        if not location:
+            return jsonify({"error": "Location is required"}), 400
         
         def run_task():
             try:
-                result = g.bot.follow_module.follow_by_location(location_pk, amount)
+                result = g.bot.follow_module.follow_by_location(location, amount)
                 log.info("Follow location task result: %s", result)
             except Exception as e:
                 log.exception("Error in follow location task: %s", e)
@@ -376,7 +425,7 @@ def follow_location():
         return jsonify({
             "message": f"Follow location task started",
             "success": True,
-            "location_pk": location_pk,
+            "location": location,
             "amount": amount
         })
         
@@ -384,60 +433,23 @@ def follow_location():
         log.exception("Error starting follow location task: %s", e)
         return jsonify({"error": str(e)}), 500
 
-@app.route('/actions/view-stories', methods=['POST'])
-def view_stories():
-    """View followers' stories"""
-    try:
-        if not g.bot.initialized or not g.bot.story_module:
-            return jsonify({"error": "Bot not initialized"}), 503
-        
-        data = request.get_json() or {}
-        view_type = data.get('type', 'followers')  # followers, following, or all
-        
-        def run_task():
-            try:
-                if view_type == 'followers':
-                    result = g.bot.story_module.view_followers_stories()
-                elif view_type == 'following':
-                    result = g.bot.story_module.view_following_stories()
-                else:
-                    # For 'all', run both followers and following stories
-                    result_followers = g.bot.story_module.view_followers_stories()
-                    result_following = g.bot.story_module.view_following_stories()
-                    result = f"✅ Followers: {result_followers}\n✅ Following: {result_following}"
-                log.info("View stories task result: %s", result)
-            except Exception as e:
-                log.exception("Error in view stories task: %s", e)
-        
-        threading.Thread(target=run_task, daemon=True).start()
-        
-        return jsonify({
-            "message": f"View {view_type} stories task started",
-            "success": True,
-            "type": view_type
-        })
-        
-    except Exception as e:
-        log.exception("Error starting view stories task: %s", e)
-        return jsonify({"error": str(e)}), 500
-
 @app.route('/actions/like-location', methods=['POST'])
 def like_location():
     """Like posts by location"""
     try:
         if not g.bot.initialized or not g.bot.like_module:
-            return jsonify({"error": "Bot not initialized"}), 503
+            return jsonify({"error": "Bot not initialized or not authenticated"}), 401
         
         data = request.get_json() or {}
-        location_pk = data.get('location_pk')
+        location = data.get('location')
         amount = data.get('amount', 20)
         
-        if not location_pk:
-            return jsonify({"error": "Location PK is required"}), 400
+        if not location:
+            return jsonify({"error": "Location is required"}), 400
         
         def run_task():
             try:
-                result = g.bot.like_module.like_location_posts(location_pk, amount)
+                result = g.bot.like_module.like_location_posts(location, amount)
                 log.info("Like location task result: %s", result)
             except Exception as e:
                 log.exception("Error in like location task: %s", e)
@@ -447,7 +459,7 @@ def like_location():
         return jsonify({
             "message": f"Like location task started",
             "success": True,
-            "location_pk": location_pk,
+            "location": location,
             "amount": amount
         })
         
@@ -455,12 +467,70 @@ def like_location():
         log.exception("Error starting like location task: %s", e)
         return jsonify({"error": str(e)}), 500
 
+@app.route('/actions/view-followers-stories', methods=['POST'])
+def view_followers_stories():
+    """View followers' stories"""
+    try:
+        if not g.bot.initialized or not g.bot.story_module:
+            return jsonify({"error": "Bot not initialized or not authenticated"}), 401
+        
+        data = request.get_json() or {}
+        reaction_chance = data.get('reaction_chance', 0.05)
+        
+        def run_task():
+            try:
+                result = g.bot.story_module.view_followers_stories(reaction_chance=reaction_chance)
+                log.info("View followers stories task result: %s", result)
+            except Exception as e:
+                log.exception("Error in view followers stories task: %s", e)
+        
+        threading.Thread(target=run_task, daemon=True).start()
+        
+        return jsonify({
+            "message": "View followers stories task started",
+            "success": True,
+            "reaction_chance": reaction_chance
+        })
+        
+    except Exception as e:
+        log.exception("Error starting view followers stories task: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/actions/view-following-stories', methods=['POST'])
+def view_following_stories():
+    """View following stories"""
+    try:
+        if not g.bot.initialized or not g.bot.story_module:
+            return jsonify({"error": "Bot not initialized or not authenticated"}), 401
+        
+        data = request.get_json() or {}
+        reaction_chance = data.get('reaction_chance', 0.05)
+        
+        def run_task():
+            try:
+                result = g.bot.story_module.view_following_stories(reaction_chance=reaction_chance)
+                log.info("View following stories task result: %s", result)
+            except Exception as e:
+                log.exception("Error in view following stories task: %s", e)
+        
+        threading.Thread(target=run_task, daemon=True).start()
+        
+        return jsonify({
+            "message": "View following stories task started",
+            "success": True,
+            "reaction_chance": reaction_chance
+        })
+        
+    except Exception as e:
+        log.exception("Error starting view following stories task: %s", e)
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/actions/send-dms', methods=['POST'])
 def send_dms():
     """Send DMs to users"""
     try:
         if not g.bot.initialized or not g.bot.dm_module:
-            return jsonify({"error": "Bot not initialized"}), 503
+            return jsonify({"error": "Bot not initialized or not authenticated"}), 401
         
         data = request.get_json() or {}
         template = data.get('template')
@@ -472,7 +542,10 @@ def send_dms():
         
         def run_task():
             try:
-                result = g.bot.dm_module.send_bulk_dms(template, target_type, amount)
+                if target_type == 'followers':
+                    result = g.bot.dm_module.dm_recent_followers(template, amount)
+                else:
+                    result = f"DM target type '{target_type}' not implemented yet"
                 log.info("Send DMs task result: %s", result)
             except Exception as e:
                 log.exception("Error in send DMs task: %s", e)
@@ -491,142 +564,5 @@ def send_dms():
         log.exception("Error starting send DMs task: %s", e)
         return jsonify({"error": str(e)}), 500
 
-# Login and status endpoints for bot integration
-@app.route('/api/bot/login', methods=['POST'])
-def bot_login():
-    """Login to Instagram with provided credentials"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "Request body required", "success": False}), 400
-        
-        username = data.get('username', '').strip()
-        password = data.get('password', '').strip()
-        
-        if not username or not password:
-            return jsonify({
-                "error": "Username and password are required",
-                "success": False
-            }), 400
-        
-        # Validate credentials format
-        if len(username) < 3:
-            return jsonify({
-                "error": "Username must be at least 3 characters long",
-                "success": False
-            }), 400
-        
-        if len(password) < 6:
-            return jsonify({
-                "error": "Password must be at least 6 characters long",
-                "success": False
-            }), 400
-        
-        # Reset bot state for fresh login
-        g.bot.initialized = False
-        g.bot.running = False
-        
-        # Attempt login
-        log.info("Attempting Instagram login for user: %s", username)
-        if not g.bot.auth.login(username, password):
-            log.error("Instagram login failed for user: %s", username)
-            return jsonify({
-                "success": False,
-                "error": "Instagram login failed",
-                "message": "Failed to login to Instagram. Please check your credentials.",
-                "instagram_connected": False
-            }), 401
-        
-        # Initialize modules after successful login
-        g.bot.follow_module = FollowModule(g.bot.auth)
-        g.bot.like_module = LikeModule(g.bot.auth)
-        g.bot.story_module = StoryModule(g.bot.auth)
-        g.bot.dm_module = DMModule(g.bot.auth)
-        g.bot.location_module = LocationModule(g.bot.auth)
-        
-        
-        g.bot.initialized = True
-        g.bot.running = True
-        
-        log.info("Instagram login and initialization successful for user: %s", username)
-        
-        return jsonify({
-            "success": True,
-            "message": "Instagram login successful",
-            "instagram_connected": True,
-
-            "initialized": True,
-            "modules_loaded": True,
-            "username": username
-        })
-        
-    except Exception as e:
-        log.exception("Error during Instagram login: %s", e)
-        return jsonify({
-            "error": "Login failed",
-            "message": f"Unexpected error: {str(e)}",
-            "success": False,
-            "instagram_connected": False
-        }), 500
-
-@app.route('/api/bot/status', methods=['GET'])
-def bot_status():
-    """Get comprehensive bot status"""
-    try:
-        # Get basic status
-        status = g.bot.get_status()
-        
-        # Add additional status info
-        status.update({
-            "bot_api_accessible": True,
-            "modules_loaded": bool(
-                g.bot.follow_module and 
-                g.bot.like_module and 
-                g.bot.story_module and 
-                g.bot.dm_module and 
-                g.bot.location_module
-            )
-        })
-        
-        # Check if credentials are configured (from database or env)
-        try:
-            import requests
-            creds_response = requests.get("http://127.0.0.1:3000/api/instagram/credentials", timeout=3)
-            status["credentials_configured"] = creds_response.status_code == 200
-            if creds_response.status_code == 200:
-                creds_data = creds_response.json()
-                status["credentials_username"] = creds_data.get("username")
-        except Exception:
-            # Fallback to env vars
-            status["credentials_configured"] = bool(os.environ.get("IG_USERNAME") and os.environ.get("IG_PASSWORD"))
-            status["credentials_username"] = os.environ.get("IG_USERNAME")
-        
-        return jsonify(status)
-        
-    except Exception as e:
-        log.exception("Error getting bot status: %s", e)
-        return jsonify({
-            "error": "Failed to get status",
-            "message": str(e),
-            "initialized": False,
-            "running": False,
-            "instagram_connected": False,
-
-            "bot_api_accessible": True
-        }), 500
-
-
-@app.errorhandler(404)
-def not_found(error):
-    """Handle 404 errors"""
-    return jsonify({"error": "Endpoint not found"}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    """Handle 500 errors"""
-    log.exception("Internal server error: %s", error)
-    return jsonify({"error": "Internal server error"}), 500
-
 if __name__ == "__main__":
-    log.info("Starting Instagram Bot API Server on http://127.0.0.1:8001")
     app.run(host="127.0.0.1", port=8001, debug=False)
