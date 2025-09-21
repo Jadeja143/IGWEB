@@ -111,6 +111,49 @@ def get_bot_stats():
             return {"error": str(e)}, 500
     return {"error": "Bot API not available"}, 503
 
+@app.route('/api/bot/login', methods=['POST'])
+def bot_login():
+    """Instagram login endpoint"""
+    if bot_api:
+        try:
+            data = request.get_json() or {}
+            username = data.get('username', '').strip()
+            password = data.get('password', '').strip()
+            verification_code = data.get('verification_code', '').strip() or None
+            
+            if not username or not password:
+                return {"error": "Username and password are required", "success": False}, 400
+            
+            result = bot_api.login(username, password, verification_code)
+            status_code = 200 if result["success"] else (401 if result.get("requires_verification") else 400)
+            
+            return result, status_code
+        except Exception as e:
+            return {"error": str(e), "success": False}, 500
+    return {"error": "Bot API not available"}, 503
+
+@app.route('/api/bot/logout', methods=['POST'])
+def bot_logout():
+    """Instagram logout endpoint"""
+    if bot_api:
+        try:
+            result = bot_api.logout()
+            return result, 200 if result["success"] else 500
+        except Exception as e:
+            return {"error": str(e), "success": False}, 500
+    return {"error": "Bot API not available"}, 503
+
+@app.route('/api/bot/test-connection', methods=['POST'])
+def bot_test_connection():
+    """Test Instagram connection"""
+    if bot_api:
+        try:
+            result = bot_api.test_connection()
+            return result, 200 if result["success"] else 401
+        except Exception as e:
+            return {"error": str(e), "success": False}, 500
+    return {"error": "Bot API not available"}, 503
+
 # Bot Action Routes
 @app.route('/api/bot/actions/follow-hashtag', methods=['POST'])
 def bot_follow_hashtag():

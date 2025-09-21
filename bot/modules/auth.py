@@ -34,8 +34,14 @@ class InstagramAuth:
         """Configure client with security best practices"""
         # Use realistic delays
         self.client.delay_range = [1, 3]
-        # Set user agent to something realistic
-        self.client.set_user_agent("Instagram 1.2.3 (iPhone; iOS 14.0; en_US)")
+        # Set user agent to current version
+        self.client.set_user_agent("Instagram 302.0.0.27.86 (iPhone14,3; iOS 17.1.1; en_US; en-US; scale=3.00; 1170x2532; 503903805)")
+        # Set additional settings to avoid detection
+        self.client.set_settings({
+            "app_version": "302.0.0.27.86",
+            "android_version": 33,
+            "android_release": "13",
+        })
     
     def login(self, username: str, password: str, verification_code: Optional[str] = None) -> Dict[str, Any]:
         """
