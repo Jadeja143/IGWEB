@@ -67,16 +67,37 @@ class InstagramBotAPI:
                     "initialized": True
                 }
             
-            # Validate credentials before attempting login
-            username = os.environ.get("IG_USERNAME", "").strip()
-            password = os.environ.get("IG_PASSWORD", "").strip()
+            # Try to get credentials from database first, then environment variables
+            username = None
+            password = None
+            
+            # Try database first - call the decryption endpoint
+            try:
+                import requests
+                creds_response = requests.get("http://127.0.0.1:3000/api/instagram/credentials/decrypt", timeout=5)
+                if creds_response.status_code == 200:
+                    creds_data = creds_response.json()
+                    username = creds_data.get("username", "").strip()
+                    password = creds_data.get("password", "").strip()
+                    log.info("Found Instagram credentials in database for user: %s", username)
+                else:
+                    log.info("No Instagram credentials found in database")
+            except Exception as e:
+                log.warning("Could not check database for Instagram credentials: %s", e)
+            
+            # Fallback to environment variables if database credentials not found
+            if not username:
+                username = os.environ.get("IG_USERNAME", "").strip()
+                password = os.environ.get("IG_PASSWORD", "").strip()
+                if username and password:
+                    log.info("Using Instagram credentials from environment variables")
             
             if not username or not password:
                 log.error("Instagram credentials not configured")
                 return {
                     "success": False,
                     "error": "Instagram credentials not configured",
-                    "message": "Please set IG_USERNAME and IG_PASSWORD environment variables",
+                    "message": "Please configure Instagram credentials in the Settings page or set IG_USERNAME and IG_PASSWORD environment variables",
                     "instagram_connected": False,
                     "initialized": False,
                     "credentials_missing": True

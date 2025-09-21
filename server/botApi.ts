@@ -5,7 +5,7 @@
 
 import { storage } from "./storage";
 
-const BOT_API_URL = process.env.BOT_API_URL || "http://127.0.0.1:8001";
+const BOT_API_URL = process.env.BOT_API_URL || "http://127.0.0.1:5000";
 
 interface BotApiResponse {
   success?: boolean;
@@ -96,7 +96,7 @@ export async function callBotApi(endpoint: string, method: "GET" | "POST" = "GET
 
 export async function getBotStatus(): Promise<any> {
   try {
-    const response = await callBotApi("/status", "GET");
+    const response = await callBotApi("/api/bot/status", "GET");
     return response;
   } catch (error: any) {
     console.warn("Failed to get bot status:", error.message);
@@ -111,12 +111,12 @@ export async function getBotStatus(): Promise<any> {
 }
 
 export async function initializeBot(): Promise<BotApiResponse> {
-  return await callBotApi("/initialize", "POST");
+  return await callBotApi("/api/bot/initialize", "POST");
 }
 
 export async function executeAction(action: string, data?: any): Promise<void> {
   try {
-    const response = await callBotApi(`/actions/${action}`, "POST", data);
+    const response = await callBotApi(`/api/bot/actions/${action}`, "POST", data);
     
     // Log successful action (best-effort, don't fail the action if logging fails)
     try {

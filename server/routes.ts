@@ -363,6 +363,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Special endpoint for bot API to get decrypted credentials - RESTRICTED TO LOCALHOST ONLY
+  app.get("/api/instagram/credentials/decrypt", async (req, res) => {
+    // Security: Only allow localhost access
+    const clientIP = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'];
+    const isLocalhost = clientIP === '127.0.0.1' || clientIP === '::1' || clientIP === '::ffff:127.0.0.1' || clientIP === 'localhost';
+    
+    if (!isLocalhost) {
+      console.warn(`Unauthorized credentials access attempt from IP: ${clientIP}`);
+      return res.status(403).json({ error: "Access denied", message: "This endpoint is restricted to localhost only" });
+    }
+    
+    try {
+      const credentials = await storage.getDecryptedCredentials();
+      if (credentials) {
+        res.json(credentials);
+      } else {
+        res.status(404).json({ message: "No Instagram credentials found" });
+      }
+    } catch (error) {
+      console.error("Failed to get credentials:", error);
+      res.status(500).json({ message: "Failed to get decrypted Instagram credentials" });
+    }
+  });
+
   // Automation actions
   app.post("/api/actions/like-followers", async (req, res) => {
     try {

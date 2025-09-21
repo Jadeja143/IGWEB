@@ -15,7 +15,7 @@ from flask import Flask, request, Response, send_from_directory, send_file
 
 # Set environment variables for proper configuration
 os.environ['NODE_ENV'] = 'production'
-os.environ['BOT_API_URL'] = 'http://127.0.0.1:8001'
+os.environ['BOT_API_URL'] = 'http://127.0.0.1:5000'
 os.environ['EXPRESS_PORT'] = '3000'  # Express server runs on port 3000 in proxy mode
 
 # Global process variables
@@ -45,6 +45,44 @@ def proxy_to_express(path):
         # Bot-specific routes are handled by Flask directly
         return {"error": f"API endpoint /api/{path} not implemented in Flask"}, 404
     
+    if path.startswith('actions/'):
+        # Redirect automation actions to bot endpoints
+        bot_endpoint = f"/api/bot/{path}"
+        try:
+            # Forward the request to the bot endpoint
+            flask_url = f"http://127.0.0.1:5000{bot_endpoint}"
+            
+            # Get request data
+            json_data = None
+            if request.is_json:
+                json_data = request.get_json()
+            
+            # Forward the request to Flask bot endpoint
+            if request.method == 'GET':
+                resp = requests.get(flask_url, params=request.args, timeout=10)
+            else:
+                resp = requests.request(
+                    method=request.method,
+                    url=flask_url,
+                    json=json_data,
+                    params=request.args,
+                    timeout=10
+                )
+            
+            # Return the response from bot endpoint
+            try:
+                return resp.json(), resp.status_code
+            except ValueError:
+                # Handle non-JSON responses
+                return {"error": "Invalid JSON response", "content": resp.text[:500]}, resp.status_code
+            
+        except requests.exceptions.ConnectionError:
+            return {"error": "Bot API not available", "message": "The bot API is not running"}, 503
+        except requests.exceptions.Timeout:
+            return {"error": "Request timeout"}, 504
+        except Exception as e:
+            return {"error": f"Bot API error: {str(e)}"}, 500
+    
     # All other API routes are proxied to Express server
     try:
         express_url = f"http://127.0.0.1:3000/api/{path}"
@@ -56,9 +94,9 @@ def proxy_to_express(path):
         
         # Forward the request to Express server
         if request.method == 'GET':
-            response = requests.get(express_url, params=request.args, timeout=10)
+            resp = requests.get(express_url, params=request.args, timeout=10)
         else:
-            response = requests.request(
+            resp = requests.request(
                 method=request.method,
                 url=express_url,
                 json=json_data,
@@ -67,7 +105,11 @@ def proxy_to_express(path):
             )
         
         # Return the response from Express server
-        return response.json(), response.status_code
+        try:
+            return resp.json(), resp.status_code
+        except ValueError:
+            # Handle non-JSON responses
+            return {"error": "Invalid JSON response", "content": resp.text[:500]}, resp.status_code
         
     except requests.exceptions.ConnectionError:
         return {"error": "Express server not available", "message": "The Node.js API server is not running"}, 503
@@ -141,6 +183,318 @@ def get_bot_stats():
     if bot_api:
         try:
             return bot_api.get_stats()
+        except Exception as e:
+            return {"error": str(e)}, 500
+    return {"error": "Bot API not available"}, 503
+
+# Bot Action Routes
+@app.route('/api/bot/actions/follow-hashtag', methods=['POST'])
+def bot_follow_hashtag():
+    """Follow users by hashtag"""
+    if bot_api:
+        try:
+            data = request.get_json() or {}
+            hashtag = data.get('hashtag')
+            amount = data.get('amount', 20)
+            
+            if not hashtag:
+                return {"error": "Hashtag is required"}, 400
+            
+            if not bot_api.initialized or not bot_api.follow_module:
+                return {"error": "Bot not initialized"}, 503
+            
+            # Run in background thread to avoid blocking
+            def run_task():
+                try:
+                    result = bot_api.follow_module.follow_by_hashtag(hashtag, amount)
+                    print(f"Follow hashtag task result: {result}")
+                except Exception as e:
+                    print(f"Error in follow hashtag task: {e}")
+            
+            import threading
+            threading.Thread(target=run_task, daemon=True).start()
+            
+            return {
+                "message": f"Follow hashtag #{hashtag} task started",
+                "success": True,
+                "hashtag": hashtag,
+                "amount": amount
+            }
+        except Exception as e:
+            return {"error": str(e)}, 500
+    return {"error": "Bot API not available"}, 503
+
+@app.route('/api/bot/actions/follow-location', methods=['POST'])
+def bot_follow_location():
+    """Follow users by location"""
+    if bot_api:
+        try:
+            data = request.get_json() or {}
+            location = data.get('location')
+            amount = data.get('amount', 20)
+            
+            if not location:
+                return {"error": "Location is required"}, 400
+            
+            if not bot_api.initialized or not bot_api.follow_module:
+                return {"error": "Bot not initialized"}, 503
+            
+            # Run in background thread to avoid blocking
+            def run_task():
+                try:
+                    result = bot_api.follow_module.follow_by_location(location, amount)
+                    print(f"Follow location task result: {result}")
+                except Exception as e:
+                    print(f"Error in follow location task: {e}")
+            
+            import threading
+            threading.Thread(target=run_task, daemon=True).start()
+            
+            return {
+                "message": f"Follow location task started",
+                "success": True,
+                "location": location,
+                "amount": amount
+            }
+        except Exception as e:
+            return {"error": str(e)}, 500
+    return {"error": "Bot API not available"}, 503
+
+@app.route('/api/bot/actions/like-followers', methods=['POST'])
+def bot_like_followers():
+    """Like posts from followers"""
+    if bot_api:
+        try:
+            data = request.get_json() or {}
+            likes_per_user = data.get('likes_per_user', 2)
+            
+            if not bot_api.initialized or not bot_api.like_module:
+                return {"error": "Bot not initialized"}, 503
+            
+            # Run in background thread to avoid blocking
+            def run_task():
+                try:
+                    result = bot_api.like_module.like_followers_posts(likes_per_user=likes_per_user)
+                    print(f"Like followers task result: {result}")
+                except Exception as e:
+                    print(f"Error in like followers task: {e}")
+            
+            import threading
+            threading.Thread(target=run_task, daemon=True).start()
+            
+            return {
+                "message": "Like followers task started",
+                "success": True,
+                "likes_per_user": likes_per_user
+            }
+        except Exception as e:
+            return {"error": str(e)}, 500
+    return {"error": "Bot API not available"}, 503
+
+@app.route('/api/bot/actions/like-following', methods=['POST'])
+def bot_like_following():
+    """Like posts from following"""
+    if bot_api:
+        try:
+            data = request.get_json() or {}
+            likes_per_user = data.get('likes_per_user', 2)
+            
+            if not bot_api.initialized or not bot_api.like_module:
+                return {"error": "Bot not initialized"}, 503
+            
+            # Run in background thread to avoid blocking
+            def run_task():
+                try:
+                    result = bot_api.like_module.like_following_posts(likes_per_user=likes_per_user)
+                    print(f"Like following task result: {result}")
+                except Exception as e:
+                    print(f"Error in like following task: {e}")
+            
+            import threading
+            threading.Thread(target=run_task, daemon=True).start()
+            
+            return {
+                "message": "Like following task started",
+                "success": True,
+                "likes_per_user": likes_per_user
+            }
+        except Exception as e:
+            return {"error": str(e)}, 500
+    return {"error": "Bot API not available"}, 503
+
+@app.route('/api/bot/actions/like-hashtag', methods=['POST'])
+def bot_like_hashtag():
+    """Like posts by hashtag"""
+    if bot_api:
+        try:
+            data = request.get_json() or {}
+            hashtag = data.get('hashtag')
+            amount = data.get('amount', 20)
+            
+            if not hashtag:
+                return {"error": "Hashtag is required"}, 400
+            
+            if not bot_api.initialized or not bot_api.like_module:
+                return {"error": "Bot not initialized"}, 503
+            
+            # Run in background thread to avoid blocking
+            def run_task():
+                try:
+                    result = bot_api.like_module.like_hashtag_posts(hashtag, amount)
+                    print(f"Like hashtag task result: {result}")
+                except Exception as e:
+                    print(f"Error in like hashtag task: {e}")
+            
+            import threading
+            threading.Thread(target=run_task, daemon=True).start()
+            
+            return {
+                "message": f"Like hashtag #{hashtag} task started",
+                "success": True,
+                "hashtag": hashtag,
+                "amount": amount
+            }
+        except Exception as e:
+            return {"error": str(e)}, 500
+    return {"error": "Bot API not available"}, 503
+
+@app.route('/api/bot/actions/like-location', methods=['POST'])
+def bot_like_location():
+    """Like posts by location"""
+    if bot_api:
+        try:
+            data = request.get_json() or {}
+            location = data.get('location')
+            amount = data.get('amount', 20)
+            
+            if not location:
+                return {"error": "Location is required"}, 400
+            
+            if not bot_api.initialized or not bot_api.like_module:
+                return {"error": "Bot not initialized"}, 503
+            
+            # Run in background thread to avoid blocking
+            def run_task():
+                try:
+                    result = bot_api.like_module.like_location_posts(location, amount)
+                    print(f"Like location task result: {result}")
+                except Exception as e:
+                    print(f"Error in like location task: {e}")
+            
+            import threading
+            threading.Thread(target=run_task, daemon=True).start()
+            
+            return {
+                "message": f"Like location task started",
+                "success": True,
+                "location": location,
+                "amount": amount
+            }
+        except Exception as e:
+            return {"error": str(e)}, 500
+    return {"error": "Bot API not available"}, 503
+
+@app.route('/api/bot/actions/view-followers-stories', methods=['POST'])
+def bot_view_followers_stories():
+    """View followers' stories"""
+    if bot_api:
+        try:
+            data = request.get_json() or {}
+            reaction_chance = data.get('reaction_chance', 0.05)
+            
+            if not bot_api.initialized or not bot_api.story_module:
+                return {"error": "Bot not initialized"}, 503
+            
+            # Run in background thread to avoid blocking
+            def run_task():
+                try:
+                    result = bot_api.story_module.view_followers_stories(reaction_chance=reaction_chance)
+                    print(f"View followers stories task result: {result}")
+                except Exception as e:
+                    print(f"Error in view followers stories task: {e}")
+            
+            import threading
+            threading.Thread(target=run_task, daemon=True).start()
+            
+            return {
+                "message": "View followers stories task started",
+                "success": True,
+                "reaction_chance": reaction_chance
+            }
+        except Exception as e:
+            return {"error": str(e)}, 500
+    return {"error": "Bot API not available"}, 503
+
+@app.route('/api/bot/actions/view-following-stories', methods=['POST'])
+def bot_view_following_stories():
+    """View following stories"""
+    if bot_api:
+        try:
+            data = request.get_json() or {}
+            reaction_chance = data.get('reaction_chance', 0.05)
+            
+            if not bot_api.initialized or not bot_api.story_module:
+                return {"error": "Bot not initialized"}, 503
+            
+            # Run in background thread to avoid blocking
+            def run_task():
+                try:
+                    result = bot_api.story_module.view_following_stories(reaction_chance=reaction_chance)
+                    print(f"View following stories task result: {result}")
+                except Exception as e:
+                    print(f"Error in view following stories task: {e}")
+            
+            import threading
+            threading.Thread(target=run_task, daemon=True).start()
+            
+            return {
+                "message": "View following stories task started",
+                "success": True,
+                "reaction_chance": reaction_chance
+            }
+        except Exception as e:
+            return {"error": str(e)}, 500
+    return {"error": "Bot API not available"}, 503
+
+@app.route('/api/bot/actions/send-dms', methods=['POST'])
+def bot_send_dms():
+    """Send DMs to users"""
+    if bot_api:
+        try:
+            data = request.get_json() or {}
+            template = data.get('template')
+            target_type = data.get('target_type', 'followers')
+            amount = data.get('amount', 10)
+            
+            if not template:
+                return {"error": "DM template is required"}, 400
+            
+            if not bot_api.initialized or not bot_api.dm_module:
+                return {"error": "Bot not initialized"}, 503
+            
+            # Run in background thread to avoid blocking
+            def run_task():
+                try:
+                    # Get user IDs based on target type
+                    user_ids = []
+                    if target_type == 'followers':
+                        result = bot_api.dm_module.dm_recent_followers(template, amount)
+                    else:
+                        result = f"DM target type '{target_type}' not implemented yet"
+                    print(f"Send DMs task result: {result}")
+                except Exception as e:
+                    print(f"Error in send DMs task: {e}")
+            
+            import threading
+            threading.Thread(target=run_task, daemon=True).start()
+            
+            return {
+                "message": f"Send DMs to {target_type} task started",
+                "success": True,
+                "template": template,
+                "target_type": target_type,
+                "amount": amount
+            }
         except Exception as e:
             return {"error": str(e)}, 500
     return {"error": "Bot API not available"}, 503
