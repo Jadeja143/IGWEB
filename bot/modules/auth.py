@@ -13,8 +13,9 @@ from typing import Optional, Dict, Any
 from instagrapi import Client
 from instagrapi.exceptions import ClientError, BadPassword, ChallengeRequired, LoginRequired
 
-# SECURITY: Exponential backoff for login failures
+# SECURITY: Exponential backoff for login failures with thread safety
 LOGIN_FAILURE_BACKOFF = {}  # username -> (failure_count, last_attempt_time)
+LOGIN_BACKOFF_LOCK = threading.Lock()  # Thread-safe access to backoff data
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +73,8 @@ class InstagramAuth:
             with self.client_lock:
                 # Try to load existing valid session first
                 if self._load_existing_session():
+                    # Clear any old login failures on successful session restore
+                    self._clear_login_failures(username)
                     log.info("Loaded existing valid Instagram session")
                     return {
                         "success": True,
@@ -96,6 +99,8 @@ class InstagramAuth:
                 self._logged_in = True
                 self._login_timestamp = time.time()
                 
+                # SECURITY: Clear login failures on successful fresh login
+                self._clear_login_failures(username)
                 log.info("Instagram login successful for user: %s", self._user_info.get('username', 'unknown'))
                 
                 return {
@@ -106,6 +111,7 @@ class InstagramAuth:
                 }
                 
         except BadPassword:
+            self._record_login_failure(username)
             log.error("Invalid Instagram credentials for user: %s", username)
             return {
                 "success": False,
@@ -113,6 +119,7 @@ class InstagramAuth:
                 "requires_verification": False
             }
         except ChallengeRequired as e:
+            self._record_login_failure(username)
             log.warning("Instagram 2FA challenge required for user: %s", username)
             return {
                 "success": False,
@@ -121,6 +128,7 @@ class InstagramAuth:
                 "challenge_info": str(e)
             }
         except ClientError as e:
+            self._record_login_failure(username)
             log.error("Instagram client error: %s", e)
             return {
                 "success": False,
@@ -128,6 +136,7 @@ class InstagramAuth:
                 "requires_verification": False
             }
         except Exception as e:
+            self._record_login_failure(username)
             log.exception("Unexpected login error: %s", e)
             return {
                 "success": False,
@@ -267,3 +276,50 @@ class InstagramAuth:
                 "success": False,
                 "error": f"Connection failed: {str(e)}"
             }
+    
+    def _check_login_backoff(self, username: str) -> Dict[str, Any]:
+        """
+        SECURITY: Thread-safe check if login attempt is allowed based on exponential backoff
+        Prevents Instagram challenges by rate limiting failed attempts
+        """
+        current_time = time.time()
+        
+        with LOGIN_BACKOFF_LOCK:  # Thread-safe access
+            if username not in LOGIN_FAILURE_BACKOFF:
+                return {"allowed": True, "retry_after": 0}
+            
+            failure_count, last_attempt = LOGIN_FAILURE_BACKOFF[username]
+            
+            # Calculate exponential backoff: 2^failures * 60 seconds, max 1 hour
+            backoff_seconds = min(60 * (2 ** failure_count), 3600)
+            time_since_last = current_time - last_attempt
+            
+            if time_since_last < backoff_seconds:
+                retry_after = int(backoff_seconds - time_since_last)
+                log.warning("Login attempt for %s blocked - %d failures, retry in %ds", 
+                           username, failure_count, retry_after)
+                return {"allowed": False, "retry_after": retry_after}
+            
+            return {"allowed": True, "retry_after": 0}
+    
+    def _record_login_failure(self, username: str):
+        """Thread-safe recording of login failure for exponential backoff calculation"""
+        current_time = time.time()
+        
+        with LOGIN_BACKOFF_LOCK:  # Thread-safe access
+            if username in LOGIN_FAILURE_BACKOFF:
+                failure_count = LOGIN_FAILURE_BACKOFF[username][0] + 1
+            else:
+                failure_count = 1
+            
+            LOGIN_FAILURE_BACKOFF[username] = (failure_count, current_time)
+            
+            log.warning("Login failure recorded for %s - %d total failures", 
+                       username, failure_count)
+    
+    def _clear_login_failures(self, username: str):
+        """Thread-safe clearing of login failure history on successful login"""
+        with LOGIN_BACKOFF_LOCK:  # Thread-safe access
+            if username in LOGIN_FAILURE_BACKOFF:
+                del LOGIN_FAILURE_BACKOFF[username]
+                log.info("Login failure history cleared for %s", username)

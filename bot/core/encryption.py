@@ -25,12 +25,11 @@ class CredentialManager:
         key_hex = os.environ.get('CRED_AES_KEY_HEX')
         
         if not key_hex:
-            # Generate a new key if none exists (development only)
-            log.warning("No CRED_AES_KEY_HEX found, generating new key for development")
-            new_key = AESGCM.generate_key(bit_length=256)
-            key_hex = new_key.hex()
-            os.environ['CRED_AES_KEY_HEX'] = key_hex
-            log.warning("Generated key: %s (store this securely!)", key_hex)
+            # SECURITY: Never auto-generate keys in production - require explicit setup
+            log.critical("FATAL: CRED_AES_KEY_HEX environment variable not set!")
+            log.critical("Generate a secure key: python -c \"import os; print(os.urandom(32).hex())\"")
+            log.critical("Set CRED_AES_KEY_HEX environment variable with the generated key")
+            raise RuntimeError("Missing required encryption key - system cannot start without CRED_AES_KEY_HEX")
         
         try:
             key_bytes = bytes.fromhex(key_hex)

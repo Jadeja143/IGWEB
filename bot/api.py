@@ -90,24 +90,25 @@ class InstagramBotAPI:
                 log.error("Failed to initialize bot controller: %s", e)
         
     def login(self, username: str, password: str, verification_code: Optional[str] = None) -> Dict[str, Any]:
-        """Secure login endpoint - credentials are not stored"""
+        """SECURITY: Redirect to centralized BotController - no direct auth bypass"""
         try:
-            # Perform secure login
-            result = self.auth.login(username, password, verification_code)
+            # SECURITY: Use ONLY centralized BotController for all authentication
+            bot_controller = get_bot_controller(self.db_manager)
+            result = bot_controller.login(username, password, verification_code)
             
-            if result["success"]:
+            if result.get("success"):
                 # Initialize modules after successful login
                 self._initialize_modules()
                 self.initialized = True
-                log.info("User authenticated and modules initialized")
+                log.info("User authenticated via BotController and modules initialized")
                 
             return result
             
         except Exception as e:
-            log.exception("Login error: %s", e)
+            log.exception("BotController login error: %s", e)
             return {
                 "success": False,
-                "error": f"Login failed: {str(e)}",
+                "error": f"Authentication system error: {str(e)}",
                 "requires_verification": False
             }
     
@@ -253,7 +254,7 @@ def initialize_bot():
 
 @app.route('/login', methods=['POST'])
 def login():
-    """Secure login endpoint"""
+    """Secure login endpoint with centralized state management"""
     try:
         data = request.get_json()
         if not data:
@@ -269,10 +270,25 @@ def login():
                 "success": False
             }), 400
         
-        result = g.bot.login(username, password, verification_code)
-        status_code = 200 if result["success"] else (401 if result.get("requires_verification") else 400)
-        
-        return jsonify(result), status_code
+        # SECURITY: ONLY use centralized BotController - NO FALLBACK
+        try:
+            bot_controller = get_bot_controller(g.bot.db_manager)
+            result = bot_controller.login(username, password, verification_code)
+            
+            if result.get("success"):
+                # Update legacy bot instance for compatibility
+                g.bot.initialized = True
+                g.bot._initialize_modules()
+            
+            return jsonify(result), 200 if result["success"] else 400
+            
+        except Exception as controller_error:
+            log.error("BotController login failed: %s", controller_error)
+            return jsonify({
+                "success": False,
+                "error": "Authentication system error - please try again",
+                "requires_verification": False
+            }), 500
         
     except Exception as e:
         log.exception("Error in login endpoint: %s", e)

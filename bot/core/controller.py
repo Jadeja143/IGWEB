@@ -196,9 +196,70 @@ class BotController:
                 return True
             return False
 
+    def login(self, username: str, password: str, verification_code: Optional[str] = None) -> Dict[str, Any]:
+        """
+        SECURITY: Centralized login with exponential backoff and state management
+        """
+        with self._lock:
+            try:
+                # Import auth module 
+                import sys
+                import os
+                sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'modules'))
+                from auth import InstagramAuth
+                
+                # Initialize auth if needed
+                if not hasattr(self, '_auth_instance'):
+                    self._auth_instance = InstagramAuth()
+                
+                # Perform authentication through InstagramAuth
+                result = self._auth_instance.login(username, password, verification_code)
+                
+                if result.get("success"):
+                    # Extract session data
+                    session_data = result.get("session_data", {})
+                    user_info = result.get("user_info", {})
+                    
+                    # Store via controller for encrypted persistence
+                    self.on_login_success(session_data, user_info)
+                    log.info("Login successful for user via BotController")
+                    
+                    return {
+                        "success": True,
+                        "message": "Login successful",
+                        "state": self._state.value
+                    }
+                else:
+                    # Handle failure through controller
+                    error_reason = result.get("error", "Login failed")
+                    self.on_login_failure(f"auth_failure: {error_reason}")
+                    
+                    return {
+                        "success": False,
+                        "error": error_reason,
+                        "requires_verification": result.get("requires_verification", False),
+                        "retry_after": result.get("retry_after", 0)
+                    }
+                    
+            except Exception as e:
+                log.error("BotController login error: %s", e)
+                self.set_state(BotState.ERROR, f"login_exception: {str(e)}")
+                return {
+                    "success": False,
+                    "error": f"Login system error: {str(e)}",
+                    "requires_verification": False
+                }
+
     def logout(self):
         """Logout and clear all session data"""
         with self._lock:
+            # Also logout from auth instance if available
+            if hasattr(self, '_auth_instance'):
+                try:
+                    self._auth_instance.logout()
+                except Exception as e:
+                    log.warning("Error during auth logout: %s", e)
+            
             self.set_state(BotState.LOGGED_OUT, "manual_logout")
 
     def get_status(self) -> Dict[str, Any]:
