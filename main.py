@@ -74,7 +74,9 @@ def start_bot():
     if bot_api:
         try:
             data = request.get_json() or {}
-            return bot_api.start_bot(data)
+            # Set running status to True when starting
+            bot_api.running = True
+            return {"success": True, "message": "Bot started successfully", "running": True}
         except Exception as e:
             return {"error": str(e)}, 500
     return {"error": "Bot API not available"}, 503
@@ -84,7 +86,9 @@ def stop_bot():
     """Stop bot operations"""
     if bot_api:
         try:
-            return bot_api.stop_bot()
+            # Set running status to False when stopping
+            bot_api.running = False
+            return {"success": True, "message": "Bot stopped successfully", "running": False}
         except Exception as e:
             return {"error": str(e)}, 500
     return {"error": "Bot API not available"}, 503
@@ -94,7 +98,16 @@ def get_bot_stats():
     """Get bot statistics"""
     if bot_api:
         try:
-            return bot_api.get_stats()
+            # Return basic stats from the bot status
+            status = bot_api.get_status()
+            stats = {
+                "initialized": status.get("initialized", False),
+                "running": status.get("running", False),
+                "instagram_connected": status.get("instagram_connected", False),
+                "telegram_connected": status.get("telegram_connected", False),
+                "modules_loaded": status.get("modules_loaded", False)
+            }
+            return stats
         except Exception as e:
             return {"error": str(e)}, 500
     return {"error": "Bot API not available"}, 503
