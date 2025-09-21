@@ -101,66 +101,78 @@ export default function Settings() {
     },
   });
 
-  const saveCredentialsMutation = useMutation({
-    mutationFn: async (credentials: { username: string; password: string }) => {
-      return await apiRequest("POST", "/api/instagram/credentials", credentials);
+  const loginMutation = useMutation({
+    mutationFn: async (credentials: { username: string; password: string; verification_code?: string }) => {
+      return await apiRequest("POST", "/api/bot/login", credentials);
     },
-    onSuccess: async (data, credentials) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/instagram/credentials"] });
+    onSuccess: (data, credentials) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
       
-      // Trigger Instagram login after saving credentials
-      try {
-        const loginResult = await apiRequest("POST", "/api/bot/login", credentials);
-        
-        if (loginResult.success) {
-          toast({
-            title: "Success",
-            description: `Instagram credentials saved and login successful for @${credentials.username}`,
-          });
-        } else {
-          toast({
-            title: "Credentials Saved, Login Failed",
-            description: `Credentials saved but login failed: ${loginResult.message || loginResult.error}`,
-            variant: "destructive",
-          });
-        }
-      } catch (loginError: any) {
+      if (data.success) {
         toast({
-          title: "Credentials Saved, Login Failed",
-          description: `Credentials saved but login failed: ${loginError.message}`,
+          title: "Success",
+          description: `Successfully logged into Instagram as @${data.user_info?.username || credentials.username}`,
+        });
+        setInstagramCredentials({ username: "", password: "" });
+        setShowPasswordField(false);
+      } else if (data.requires_verification) {
+        toast({
+          title: "Two-Factor Authentication Required",
+          description: "Please check your Instagram app or email for the verification code",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Login Failed",
+          description: data.error || "Failed to login to Instagram",
           variant: "destructive",
         });
       }
-      
-      queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
-      setInstagramCredentials({ username: "", password: "" });
-      setShowPasswordField(false);
     },
     onError: (error) => {
       toast({
         title: "Error",
-        description: error.message || "Failed to save credentials",
+        description: error.message || "Failed to login",
         variant: "destructive",
       });
     },
   });
 
-  const testCredentialsMutation = useMutation({
-    mutationFn: async (credentials: { username: string; password: string }) => {
-      const response = await apiRequest("POST", "/api/instagram/credentials/test", credentials);
-      return response as unknown as { success: boolean; message: string };
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/bot/logout", {});
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
+      toast({
+        title: "Success",
+        description: "Logged out successfully",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to logout",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const testConnectionMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/bot/test-connection", {});
     },
     onSuccess: (data) => {
       toast({
         title: data.success ? "Success" : "Error",
-        description: data.message,
+        description: data.success ? "Instagram connection is working" : data.error,
         variant: data.success ? "default" : "destructive",
       });
     },
     onError: (error) => {
       toast({
         title: "Error",
-        description: error.message || "Failed to test credentials",
+        description: error.message || "Failed to test connection",
         variant: "destructive",
       });
     },
@@ -177,7 +189,7 @@ export default function Settings() {
     });
   };
 
-  const handleSaveCredentials = () => {
+  const handleLogin = () => {
     if (!instagramCredentials.username || !instagramCredentials.password) {
       toast({
         title: "Error",
@@ -186,19 +198,15 @@ export default function Settings() {
       });
       return;
     }
-    saveCredentialsMutation.mutate(instagramCredentials);
+    loginMutation.mutate(instagramCredentials);
   };
 
-  const handleTestCredentials = () => {
-    if (!instagramCredentials.username || !instagramCredentials.password) {
-      toast({
-        title: "Error",
-        description: "Please enter both username and password",
-        variant: "destructive",
-      });
-      return;
-    }
-    testCredentialsMutation.mutate(instagramCredentials);
+  const handleLogout = () => {
+    logoutMutation.mutate();
+  };
+
+  const handleTestConnection = () => {
+    testConnectionMutation.mutate();
   };
 
   const handleResetData = () => {
@@ -264,32 +272,26 @@ export default function Settings() {
                       data-testid="input-instagram-password"
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Your password is encrypted and stored securely
+                      Credentials are used only for login - not stored permanently
                     </p>
                   </div>
                   <div className="flex space-x-2">
                     <Button
-                      onClick={handleTestCredentials}
-                      disabled={testCredentialsMutation.isPending || !instagramCredentials.username || !instagramCredentials.password}
-                      variant="outline"
-                      data-testid="button-test-credentials"
+                      onClick={handleLogin}
+                      disabled={loginMutation.isPending || !instagramCredentials.username || !instagramCredentials.password}
+                      data-testid="button-login"
+                      className="flex-1"
                     >
-                      Test Connection
+                      {loginMutation.isPending ? "Logging in..." : "Login"}
                     </Button>
-                    <Button
-                      onClick={handleSaveCredentials}
-                      disabled={saveCredentialsMutation.isPending || !instagramCredentials.username || !instagramCredentials.password}
-                      data-testid="button-save-credentials"
-                    >
-                      Save Credentials
-                    </Button>
+                    
                     <Button
                       onClick={() => {
                         setShowPasswordField(false);
                         setInstagramCredentials({ username: "", password: "" });
                       }}
                       variant="ghost"
-                      data-testid="button-cancel-credentials"
+                      data-testid="button-cancel-login"
                     >
                       Cancel
                     </Button>
@@ -299,17 +301,16 @@ export default function Settings() {
 
               <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
                 <div>
-                  <p className="font-medium">Connection Status</p>
+                  <p className="font-medium">Session Status</p>
                   <p className="text-sm text-muted-foreground">
-                    {botStatus?.instagram_connected ? "Connected" : "Disconnected"}
-                    {botStatus?.credentials_username && (
-                      <span className="ml-2 text-green-600">@{botStatus.credentials_username}</span>
+                    {botStatus?.instagram_connected ? "Authenticated" : "Not logged in"}
+                    {botStatus?.user_info?.username && (
+                      <span className="ml-2 text-green-600">@{botStatus.user_info.username}</span>
                     )}
                   </p>
                 </div>
                 <div className={`w-3 h-3 rounded-full ${
-                  botStatus?.instagram_connected ? "bg-green-500" : 
-                  botStatus?.credentials_configured ? "bg-yellow-500" : "bg-red-500"
+                  botStatus?.instagram_connected ? "bg-green-500" : "bg-red-500"
                 }`} />
               </div>
             </div>
