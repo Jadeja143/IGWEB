@@ -12,6 +12,7 @@ import sys
 import requests
 import atexit
 import psycopg2
+from datetime import datetime
 from functools import wraps
 from flask import Flask, request, Response, send_from_directory, send_file, jsonify
 
@@ -27,6 +28,10 @@ servers_started = False
 
 # Flask WSGI app
 app = Flask(__name__, static_folder='dist/public', static_url_path='')
+
+# Ensure static_folder exists or set to None
+if not os.path.exists('dist/public'):
+    app.static_folder = None
 
 # Setup enhanced error system
 try:
@@ -601,17 +606,24 @@ atexit.register(cleanup_servers)
 @app.route('/')
 def serve_index():
     """Serve the React app"""
-    return send_from_directory(app.static_folder, 'index.html')
+    if app.static_folder and os.path.exists(os.path.join(app.static_folder, 'index.html')):
+        return send_from_directory(app.static_folder, 'index.html')
+    else:
+        return "<h1>App Loading...</h1><p>Frontend build files not ready yet. Please run 'npm run build' first.</p>"
 
 @app.route('/<path:path>')
 def serve_static(path):
     """Serve static files and handle client-side routing"""
     # Try to serve static file first
-    try:
-        return send_from_directory(app.static_folder, path)
-    except:
-        # If static file doesn't exist, serve index.html (client-side routing)
-        return send_from_directory(app.static_folder, 'index.html')
+    if app.static_folder and os.path.exists(app.static_folder):
+        try:
+            return send_from_directory(app.static_folder, path)
+        except:
+            # If static file doesn't exist, serve index.html (client-side routing)
+            if os.path.exists(os.path.join(app.static_folder, 'index.html')):
+                return send_from_directory(app.static_folder, 'index.html')
+    
+    return "<h1>404 - File not found</h1>"
 
 # ================================
 # AUTH ENDPOINTS
@@ -679,7 +691,10 @@ def register():
                 RETURNING id
             """, (username, password_hash))
             
-            user_id = cursor.fetchone()[0]
+            result = cursor.fetchone()
+            user_id = result[0] if result else None
+            if not user_id:
+                raise Exception("Failed to create user")
             conn.commit()
             
             # Regenerate session ID to prevent session fixation
