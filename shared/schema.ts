@@ -99,6 +99,17 @@ export const botInstances = pgTable("bot_instances", {
   is_active: boolean("is_active").default(true),
 });
 
+export const errorCodes = pgTable("error_codes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  code: text("code").notNull().unique(),
+  module: text("module").notNull(),
+  severity: text("severity").notNull(),
+  description: text("description").notNull(),
+  file_path: text("file_path"),
+  recommended_action: text("recommended_action"),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
 // Schemas for validation
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
@@ -164,6 +175,15 @@ export const updateBotInstanceSchema = createInsertSchema(botInstances).pick({
   is_active: true,
 });
 
+export const insertErrorCodeSchema = createInsertSchema(errorCodes).pick({
+  code: true,
+  module: true,
+  severity: true,
+  description: true,
+  file_path: true,
+  recommended_action: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect & {
@@ -197,3 +217,5 @@ export type UserBotStatus = typeof userBotStatus.$inferSelect;
 export type InsertBotInstance = z.infer<typeof insertBotInstanceSchema>;
 export type UpdateBotInstance = z.infer<typeof updateBotInstanceSchema>;
 export type BotInstance = typeof botInstances.$inferSelect;
+export type ErrorCode = typeof errorCodes.$inferSelect;
+export type InsertErrorCode = z.infer<typeof insertErrorCodeSchema>;
