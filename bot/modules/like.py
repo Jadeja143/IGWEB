@@ -13,6 +13,7 @@ from .database import (
     reset_daily_limits_if_needed, unified_increment_limit, unified_get_limits, 
     unified_get_daily_cap, unified_reset_daily_limits_if_needed
 )
+from ..core.guards import secure_automation_action
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class LikeModule:
     def __init__(self, auth):
         self.auth = auth
     
+    @secure_automation_action("like", max_per_hour=200)
     def like_followers_posts(self, likes_per_user: int = 2, daily_cap_check: bool = True) -> str:
         """Like posts from followers - FIXED VERSION"""
         if not self.auth.is_logged_in():
@@ -114,6 +116,7 @@ class LikeModule:
             log.exception("Error in like_followers_posts: %s", e)
             return f"❌ Error: {e}"
     
+    @secure_automation_action("like", max_per_hour=200)
     def like_following_posts(self, likes_per_user: int = 2, daily_cap_check: bool = True) -> str:
         """Like posts from following - FIXED VERSION"""
         if not self.auth.is_logged_in():
@@ -206,6 +209,7 @@ class LikeModule:
             log.exception("Error in like_following_posts: %s", e)
             return f"❌ Error: {e}"
     
+    @secure_automation_action("like", max_per_hour=200)
     def like_hashtag_posts(self, hashtag: str, amount: int = 50, daily_cap_check: bool = True) -> str:
         """Like posts from hashtag"""
         if not self.auth.is_logged_in():
@@ -253,6 +257,7 @@ class LikeModule:
             log.exception("Error in like_hashtag_posts: %s", e)
             return f"❌ Error: {e}"
     
+    @secure_automation_action("like", max_per_hour=200)
     def like_location_posts(self, location: str, amount: int = 50, daily_cap_check: bool = True) -> str:
         """Like posts from location"""
         if not self.auth.is_logged_in():

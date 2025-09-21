@@ -14,6 +14,7 @@ from .database import (
     reset_daily_limits_if_needed, unified_increment_limit, unified_get_limits, 
     unified_get_daily_cap, unified_reset_daily_limits_if_needed
 )
+from ..core.guards import secure_automation_action, require_running
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class FollowModule:
     def __init__(self, auth):
         self.auth = auth
     
+    @secure_automation_action("follow", max_per_hour=50)
     def follow_by_hashtag(self, hashtag: str, amount: int = 20, daily_cap_check: bool = True) -> str:
         """Follow users from hashtag posts"""
         if not self.auth.is_logged_in():
@@ -83,6 +85,7 @@ class FollowModule:
             log.exception("Error in follow_by_hashtag: %s", e)
             return f"❌ Error: {e}"
     
+    @secure_automation_action("follow", max_per_hour=50)
     def follow_by_location(self, location: str, amount: int = 20, daily_cap_check: bool = True) -> str:
         """Follow users from location posts"""
         if not self.auth.is_logged_in():
@@ -150,6 +153,7 @@ class FollowModule:
             log.exception("Error in follow_by_location: %s", e)
             return f"❌ Error: {e}"
     
+    @secure_automation_action("unfollow", max_per_hour=100)
     def unfollow_old(self, days_threshold: int = 7, daily_cap_check: bool = True) -> str:
         """Unfollow users who haven't followed back after specified days"""
         if not self.auth.is_logged_in():
@@ -231,11 +235,13 @@ class FollowModule:
         execute_db("DELETE FROM followed_users WHERE user_id=?", (user_id,))
         execute_db("INSERT OR REPLACE INTO unfollowed_users (user_id) VALUES (?)", (user_id,))
     
+    @require_running
     def add_to_blacklist(self, user_id: str) -> str:
         """Add user to blacklist"""
         execute_db("INSERT OR REPLACE INTO blacklist_users (user_id) VALUES (?)", (user_id,))
         return f"✅ Added user {user_id} to blacklist"
     
+    @require_running
     def remove_from_blacklist(self, user_id: str) -> str:
         """Remove user from blacklist"""
         execute_db("DELETE FROM blacklist_users WHERE user_id=?", (user_id,))

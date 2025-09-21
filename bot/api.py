@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 import json
+import importlib.util
 from typing import Optional, Dict, Any
 from flask import Flask, jsonify, request, g
 from flask_cors import CORS
@@ -24,6 +25,8 @@ from modules.like import LikeModule
 from modules.story import StoryModule
 from modules.dm import DMModule
 from modules.location import LocationModule
+from core.controller import get_bot_controller
+from core.state import BotState
 
 # Logging setup
 logging.basicConfig(
@@ -44,7 +47,7 @@ bot_instance = None
 bot_lock = threading.Lock()
 
 class InstagramBotAPI:
-    """Secure Instagram Bot API Controller"""
+    """Secure Instagram Bot API Controller with centralized state management"""
     
     def __init__(self):
         self.auth = InstagramAuth()
@@ -53,15 +56,38 @@ class InstagramBotAPI:
         self.story_module = None
         self.dm_module = None
         self.location_module = None
-        self.initialized = False
-        self.running = False
         
-        # Initialize database
+        # Initialize database first
         try:
+            # Use absolute import to avoid relative import issues
+            current_dir = os.path.dirname(__file__)
+            db_module_path = os.path.join(current_dir, 'modules', 'database.py')
+            spec = importlib.util.spec_from_file_location("database", db_module_path)
+            db_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(db_module)
+            
+            self.db_manager = db_module.DatabaseManager()
             init_database()
             log.info("Database initialized")
         except Exception as e:
             log.warning("Database initialization failed: %s", e)
+            self.db_manager = None
+        
+        # Initialize centralized bot controller (skip if database failed)
+        self.bot_controller = None
+        if self.db_manager:
+            try:
+                # Use absolute path for core modules
+                current_dir = os.path.dirname(__file__)
+                controller_module_path = os.path.join(current_dir, 'core', 'controller.py')
+                spec = importlib.util.spec_from_file_location("controller", controller_module_path)
+                controller_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(controller_module)
+                
+                self.bot_controller = controller_module.get_bot_controller(self.db_manager)
+                log.info("Bot controller initialized with state: %s", self.bot_controller.state)
+            except Exception as e:
+                log.error("Failed to initialize bot controller: %s", e)
         
     def login(self, username: str, password: str, verification_code: Optional[str] = None) -> Dict[str, Any]:
         """Secure login endpoint - credentials are not stored"""

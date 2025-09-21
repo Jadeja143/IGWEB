@@ -13,6 +13,7 @@ from .database import (
     reset_daily_limits_if_needed, unified_increment_limit, unified_get_limits, 
     unified_get_daily_cap, unified_reset_daily_limits_if_needed
 )
+from ..core.guards import secure_automation_action, require_running
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class DMModule:
             "Hello {username}! I've been following your journey and it's really inspiring! 🌟",
         ]
     
+    @secure_automation_action("dm", max_per_hour=15)
     def send_personalized_dm(self, user_id: str, message_template: str, daily_cap_check: bool = True) -> str:
         """Send personalized DM to specific user"""
         if not self.auth.is_logged_in():
@@ -56,6 +58,7 @@ class DMModule:
             log.exception("Error sending DM to %s: %s", user_id, e)
             return f"❌ Error: {e}"
     
+    @secure_automation_action("dm", max_per_hour=15)
     def send_bulk_dms(self, user_ids: List[str], message_template: str, 
                      daily_cap_check: bool = True) -> str:
         """Send DMs to multiple users"""
@@ -106,6 +109,7 @@ class DMModule:
         execute_db("DELETE FROM dm_templates WHERE id=?", (template_id,))
         return f"✅ Removed DM template"
     
+    @secure_automation_action("dm", max_per_hour=15)
     def dm_recent_followers(self, message_template: str | None = None, amount: int = 5, 
                            daily_cap_check: bool = True) -> str:
         """Send DMs to recent followers"""

@@ -15,6 +15,37 @@ log = logging.getLogger(__name__)
 DB_FILE = "bot_data.sqlite"
 db_lock = threading.Lock()
 
+class DatabaseManager:
+    """Simple database manager for bot controller integration"""
+    
+    def __init__(self):
+        self.db_file = DB_FILE
+        self.lock = db_lock
+    
+    def get_bot_status(self) -> Dict[str, Any]:
+        """Get current bot status from PostgreSQL via Node.js API"""
+        try:
+            import requests
+            response = requests.get(f"{NODE_API_URL}/api/bot/status", timeout=5)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                log.warning("Failed to get bot status from Node.js API: %s", response.status_code)
+                return {}
+        except Exception as e:
+            log.warning("Error getting bot status: %s", e)
+            return {}
+    
+    def update_bot_status(self, data: Dict[str, Any]) -> bool:
+        """Update bot status in PostgreSQL via Node.js API"""
+        try:
+            import requests
+            response = requests.post(f"{NODE_API_URL}/api/bot/status", json=data, timeout=5)
+            return response.status_code == 200
+        except Exception as e:
+            log.error("Error updating bot status: %s", e)
+            return False
+
 # Node.js server URL for unified API calls
 NODE_API_URL = "http://127.0.0.1:3000"
 
