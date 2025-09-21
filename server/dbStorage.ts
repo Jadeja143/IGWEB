@@ -9,7 +9,9 @@ import {
   locations, 
   dmTemplates, 
   activityLogs,
-  instagramCredentials
+  instagramCredentials,
+  userBotStatus,
+  botInstances
 } from "@shared/schema";
 import {
   type User, 
@@ -26,7 +28,13 @@ import {
   type InsertDMTemplate,
   type UpdateDailyLimits,
   type InsertInstagramCredentials,
-  type InstagramCredentials
+  type InstagramCredentials,
+  type UserBotStatus,
+  type InsertUserBotStatus,
+  type UpdateUserBotStatus,
+  type BotInstance,
+  type InsertBotInstance,
+  type UpdateBotInstance
 } from "@shared/schema";
 import { encryptPassword, decryptPassword, type EncryptedData } from "./encryption";
 import type { IStorage } from "./storage";
@@ -345,5 +353,178 @@ export class DatabaseStorage implements IStorage {
       console.error("Failed to decrypt Instagram credentials:", error);
       return null;
     }
+  }
+
+  // User Bot Status operations
+  async getUserBotStatus(userId: string): Promise<UserBotStatus | undefined> {
+    const result = await db.select().from(userBotStatus)
+      .where(eq(userBotStatus.user_id, userId))
+      .limit(1);
+    return result[0];
+  }
+
+  async createUserBotStatus(status: InsertUserBotStatus): Promise<UserBotStatus> {
+    const result = await db.insert(userBotStatus).values(status).returning();
+    
+    await this.addActivityLog({
+      action: "User Bot Status Created",
+      details: `Created bot status for user: ${status.user_id}`,
+      status: "success"
+    });
+    
+    return result[0];
+  }
+
+  async updateUserBotStatus(userId: string, status: UpdateUserBotStatus): Promise<UserBotStatus> {
+    const result = await db.update(userBotStatus)
+      .set({ ...status, last_tested: new Date() })
+      .where(eq(userBotStatus.user_id, userId))
+      .returning();
+    
+    if (result.length === 0) {
+      throw new Error("User bot status not found");
+    }
+
+    await this.addActivityLog({
+      action: "User Bot Status Updated",
+      details: `Updated bot status for user: ${userId}`,
+      status: "success"
+    });
+    
+    return result[0];
+  }
+
+  async updateSessionValidity(
+    userId: string, 
+    isValid: boolean, 
+    errorCode?: string, 
+    errorMessage?: string,
+    instagramUsername?: string
+  ): Promise<UserBotStatus> {
+    // Check if user bot status exists, create if not
+    let existing = await this.getUserBotStatus(userId);
+    
+    if (!existing) {
+      // Create new status record
+      existing = await this.createUserBotStatus({
+        user_id: userId,
+        instagram_username: instagramUsername || null,
+        session_valid: isValid,
+        last_tested: new Date(),
+        bot_running: false,
+        last_error_code: errorCode || null,
+        last_error_message: errorMessage || null,
+      });
+    } else {
+      // Update existing record
+      existing = await this.updateUserBotStatus(userId, {
+        instagram_username: instagramUsername || existing.instagram_username,
+        session_valid: isValid,
+        last_tested: new Date(),
+        last_error_code: errorCode || null,
+        last_error_message: errorMessage || null,
+      });
+    }
+
+    await this.addActivityLog({
+      action: "Session Validation",
+      details: `Session validation for user ${userId}: ${isValid ? 'valid' : 'invalid'}${errorMessage ? ` - ${errorMessage}` : ''}`,
+      status: isValid ? "success" : "error"
+    });
+
+    return existing;
+  }
+
+  async getUserBotRunningStatus(userId: string): Promise<boolean> {
+    const status = await this.getUserBotStatus(userId);
+    return status?.bot_running || false;
+  }
+
+  async setUserBotRunningStatus(userId: string, running: boolean): Promise<UserBotStatus> {
+    let existing = await this.getUserBotStatus(userId);
+    
+    if (!existing) {
+      // Create new status record if it doesn't exist
+      existing = await this.createUserBotStatus({
+        user_id: userId,
+        instagram_username: null,
+        session_valid: false,
+        last_tested: null,
+        bot_running: running,
+        last_error_code: null,
+        last_error_message: null,
+      });
+    } else {
+      // Update existing record
+      existing = await this.updateUserBotStatus(userId, {
+        bot_running: running,
+      });
+    }
+
+    await this.addActivityLog({
+      action: `Bot ${running ? 'Started' : 'Stopped'}`,
+      details: `Bot ${running ? 'started' : 'stopped'} for user: ${userId}`,
+      status: "success"
+    });
+
+    return existing;
+  }
+
+  // Bot Instances management
+  async getBotInstance(userId: string): Promise<BotInstance | undefined> {
+    const result = await db.select().from(botInstances).where(eq(botInstances.user_id, userId)).limit(1);
+    return result[0];
+  }
+
+  async createBotInstance(instance: InsertBotInstance): Promise<BotInstance> {
+    const result = await db.insert(botInstances).values({
+      ...instance,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }).returning();
+    return result[0];
+  }
+
+  async updateBotInstance(userId: string, updates: UpdateBotInstance): Promise<BotInstance> {
+    const result = await db.update(botInstances)
+      .set({ ...updates, updated_at: new Date() })
+      .where(eq(botInstances.user_id, userId))
+      .returning();
+    return result[0];
+  }
+
+  async deactivateBotInstance(userId: string): Promise<boolean> {
+    const result = await db.update(botInstances)
+      .set({ is_active: false, updated_at: new Date() })
+      .where(eq(botInstances.user_id, userId));
+    return result.rowCount > 0;
+  }
+
+  async getAllActiveBotInstances(): Promise<BotInstance[]> {
+    const result = await db.select().from(botInstances)
+      .where(eq(botInstances.is_active, true));
+    return result;
+  }
+
+  async getOrCreateBotInstance(userId: string): Promise<BotInstance> {
+    let existing = await this.getBotInstance(userId);
+    
+    if (!existing) {
+      // Create new bot instance with user-specific SQLite database path
+      const sqliteDbPath = `bot_data_user_${userId}.sqlite`;
+      existing = await this.createBotInstance({
+        user_id: userId,
+        sqlite_db_path: sqliteDbPath,
+        is_active: true,
+      });
+      
+      await this.addActivityLog({
+        action: "Bot Instance Created",
+        details: `Created new bot instance for user: ${userId} with database: ${sqliteDbPath}`,
+        status: "success"
+      });
+    }
+    
+    return existing;
   }
 }

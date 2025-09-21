@@ -77,7 +77,7 @@ class BotScheduler:
         try:
             # SECURITY: Check bot state before running automation
             if not self._can_run_automation():
-                log.info("Skipping cleanup - bot not in running state")
+                log.info("Skipping cleanup - bot not in running state or session invalid")
                 return
                 
             log.info("Running scheduled cleanup of old follows")
@@ -91,7 +91,7 @@ class BotScheduler:
         try:
             # SECURITY: Check bot state before running automation
             if not self._can_run_automation():
-                log.info("Skipping like task - bot not in running state")
+                log.info("Skipping like task - bot not in running state or session invalid")
                 return
                 
             log.info("Running scheduled like followers task")
@@ -105,7 +105,7 @@ class BotScheduler:
         try:
             # SECURITY: Check bot state before running automation
             if not self._can_run_automation():
-                log.info("Skipping stories task - bot not in running state")
+                log.info("Skipping stories task - bot not in running state or session invalid")
                 return
                 
             log.info("Running scheduled view stories task")
@@ -127,7 +127,7 @@ class BotScheduler:
             
             # SECURITY: Check bot state before running automation
             if not self._can_run_automation():
-                log.info("Skipping follow task - bot not in running state")
+                log.info("Skipping follow task - bot not in running state or session invalid")
                 return
                 
             for hashtag_row in hashtags:
@@ -140,12 +140,16 @@ class BotScheduler:
         except Exception as e:
             log.exception("Error in scheduled follow hashtag: %s", e)
     
-    def _can_run_automation(self) -> bool:
+    def _can_run_automation(self, user_id: str = "") -> bool:
         """
-        SECURITY CHECK: Verify bot is in correct state to run automation.
-        This prevents automation from running when not logged in or not authorized.
+        SECURITY CHECK: Verify bot is in correct state and user has valid session to run automation.
+        This prevents automation from running when not logged in, not authorized, or session is invalid.
         """
         try:
+            # CRITICAL: Check per-user session validity first
+            if not self._check_user_session_validity(user_id):
+                return False
+            
             # Try to get centralized bot controller
             if get_bot_controller and BotState:
                 controller = get_bot_controller()
@@ -170,6 +174,83 @@ class BotScheduler:
         except Exception as e:
             log.error("Error checking automation permissions: %s", e)
             return False  # Fail safe - block automation if check fails
+    
+    def _check_user_session_validity(self, user_id: str = "") -> bool:
+        """
+        CRITICAL: Check if user has valid Instagram session in database.
+        This checks user_bot_status.session_valid and last_tested timestamp.
+        """
+        try:
+            # Get user_id if not provided (for scheduled tasks, use default user)
+            if not user_id:
+                user_id = self._get_default_user_id()
+                if not user_id:
+                    log.error("No user ID available for session validation")
+                    return False
+                    
+            # Import database module to check session validity
+            from .database import fetch_db
+            
+            # Check user session validity from user_bot_status table
+            result = fetch_db("""
+                SELECT session_valid, last_tested, last_error_message, instagram_username
+                FROM user_bot_status 
+                WHERE user_id = %s
+            """, (user_id,))
+            
+            if not result:
+                log.warning("No session status found for user %s - blocking automation", user_id)
+                return False
+            
+            session_valid, last_tested, last_error_message, instagram_username = result[0]
+            
+            if not session_valid:
+                error_msg = last_error_message or "Session is invalid"
+                log.warning("Automation blocked - Instagram session invalid for user %s: %s", user_id, error_msg)
+                return False
+            
+            # Check if session was tested recently (within last 24 hours)
+            if last_tested:
+                from datetime import datetime
+                time_diff = datetime.now() - last_tested
+                if time_diff.total_seconds() > 86400:  # 24 hours
+                    log.warning("Automation blocked - Session not tested recently for user %s (last tested: %s)", 
+                              user_id, last_tested)
+                    return False
+            else:
+                log.warning("Automation blocked - Session never tested for user %s", user_id)
+                return False
+            
+            log.debug("Session validation passed for user %s (%s)", user_id, instagram_username or 'unknown')
+            return True
+            
+        except Exception as e:
+            log.error("Error checking user session validity: %s", e)
+            return False  # Fail safe - block automation if check fails
+    
+    def _get_default_user_id(self) -> str:
+        """Get default user ID for scheduled operations"""
+        try:
+            from .database import fetch_db
+            
+            # Try to find default user
+            result = fetch_db("SELECT id FROM users WHERE username = %s LIMIT 1", ('default_user',))
+            if result:
+                return str(result[0][0])
+            
+            # Try to get the first user if no default found
+            result = fetch_db("SELECT id FROM users LIMIT 1")
+            if result:
+                return str(result[0][0])
+                
+            log.error("No users found in database for scheduled operations")
+            # Return empty string instead of None to maintain type safety
+            return ""
+            
+        except Exception as e:
+            log.error("Error getting default user ID: %s", e)
+            # Return empty string instead of None to maintain type safety
+            return ""
 
     def add_custom_task(self, schedule_string: str, task_name: str, task_func, *args, **kwargs):
         """Add a custom scheduled task"""

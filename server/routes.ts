@@ -1,8 +1,103 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
+
+// Extend Express Request type to include user info
+declare global {
+  namespace Express {
+    interface Request {
+      user?: {
+        id: string;
+        botStatus: any;
+      };
+    }
+  }
+}
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertHashtagSchema, insertLocationSchema, insertDMTemplateSchema, updateDailyLimitsSchema, insertInstagramCredentialsSchema } from "@shared/schema";
 import { getBotStatus, executeAction } from "./botApi";
+
+// Session validation middleware
+async function requireValidSession(req: Request, res: Response, next: NextFunction) {
+  try {
+    // Extract user ID from X-User-ID header
+    const userId = req.headers['x-user-id'] as string;
+    const userAgent = req.headers['user-agent'] || 'unknown';
+    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+    
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: "User ID required",
+        message: "X-User-ID header is required for bot actions",
+        requires_session_test: true
+      });
+    }
+
+    // Enhanced user validation - check if user exists and validate format
+    if (!/^[a-zA-Z0-9\-_]{1,36}$/.test(userId)) {
+      console.warn(`[SECURITY] Invalid user ID format from IP ${clientIp}: ${userId}`);
+      return res.status(401).json({
+        success: false,
+        error: "Invalid user ID format",
+        message: "User ID contains invalid characters",
+        requires_session_test: true
+      });
+    }
+    
+    const user = await storage.getUser(userId);
+    if (!user) {
+      console.warn(`[SECURITY] User not found from IP ${clientIp}: ${userId}`);
+      return res.status(401).json({
+        success: false,
+        error: "Invalid user",
+        message: "User not found",
+        requires_session_test: true
+      });
+    }
+
+    // Check user's session validity
+    const userBotStatus = await storage.getUserBotStatus(userId);
+    
+    if (!userBotStatus || !userBotStatus.session_valid) {
+      return res.status(401).json({
+        success: false,
+        error: "Session validation failed",
+        message: userBotStatus?.last_error_message || "Instagram session is invalid",
+        requires_session_test: true
+      });
+    }
+
+    // Check if session was tested recently (within last 24 hours)
+    if (userBotStatus.last_tested) {
+      const timeDiff = Date.now() - userBotStatus.last_tested.getTime();
+      const hoursAgo = timeDiff / (1000 * 60 * 60);
+      
+      if (hoursAgo > 24) {
+        return res.status(401).json({
+          success: false,
+          error: "Session expired",
+          message: "Session not tested recently - please test connection",
+          requires_session_test: true
+        });
+      }
+    }
+
+    // Log successful authentication for security monitoring
+    console.log(`[AUTH] User ${userId} authenticated from IP ${clientIp}`);
+    
+    // Add user info to request for downstream handlers
+    req.user = { id: userId, botStatus: userBotStatus };
+    next();
+    
+  } catch (error: any) {
+    console.error("Session validation error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Session validation error",
+      message: error.message || "Internal server error during session validation"
+    });
+  }
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Bot status routes
@@ -45,8 +140,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Initialize bot endpoint
-  app.post("/api/bot/initialize", async (req, res) => {
+  // Initialize bot endpoint - requires valid session
+  app.post("/api/bot/initialize", requireValidSession, async (req, res) => {
     try {
       const { initializeBot } = await import("./botApi");
       const result = await initializeBot();
@@ -75,7 +170,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Instagram login trigger endpoint
+  // Instagram login trigger endpoint - NO session validation needed (users need to recover invalid sessions)
   app.post("/api/bot/login", async (req, res) => {
     try {
       const { triggerBotLogin } = await import("./botApi");
@@ -389,7 +484,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(validatedCredentials),
-        timeout: 30000 // 30 second timeout
       });
       
       const result = await response.json();
@@ -452,7 +546,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Automation actions
-  app.post("/api/actions/like-followers", async (req, res) => {
+  app.post("/api/actions/like-followers", requireValidSession, async (req, res) => {
     try {
       await executeAction("like-followers", req.body);
       res.json({ message: "Like followers task started" });
@@ -463,7 +557,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/actions/follow-hashtag", async (req, res) => {
+  app.post("/api/actions/follow-hashtag", requireValidSession, async (req, res) => {
     try {
       const { hashtag, amount = 20 } = req.body;
       if (!hashtag) {
@@ -479,7 +573,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/actions/view-stories", async (req, res) => {
+  app.post("/api/actions/view-stories", requireValidSession, async (req, res) => {
     try {
       await executeAction("view-stories", req.body);
       res.json({ message: "View stories task started" });
@@ -491,7 +585,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Additional action endpoints
-  app.post("/api/actions/like-following", async (req, res) => {
+  app.post("/api/actions/like-following", requireValidSession, async (req, res) => {
     try {
       await executeAction("like-following", req.body);
       res.json({ message: "Like following task started" });
@@ -502,7 +596,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/actions/like-hashtag", async (req, res) => {
+  app.post("/api/actions/like-hashtag", requireValidSession, async (req, res) => {
     try {
       const { hashtag, amount = 20 } = req.body;
       if (!hashtag) {
@@ -518,7 +612,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/actions/like-location", async (req, res) => {
+  app.post("/api/actions/like-location", requireValidSession, async (req, res) => {
     try {
       const { location_pk, amount = 20 } = req.body;
       if (!location_pk) {
@@ -534,7 +628,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/actions/follow-location", async (req, res) => {
+  app.post("/api/actions/follow-location", requireValidSession, async (req, res) => {
     try {
       const { location_pk, amount = 20 } = req.body;
       if (!location_pk) {
@@ -550,7 +644,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/actions/send-dms", async (req, res) => {
+  app.post("/api/actions/send-dms", requireValidSession, async (req, res) => {
     try {
       const { template, target_type = "followers", amount = 10 } = req.body;
       if (!template) {
@@ -566,7 +660,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/actions/view-followers-stories", async (req, res) => {
+  app.post("/api/actions/view-followers-stories", requireValidSession, async (req, res) => {
     try {
       await executeAction("view-stories", { type: "followers" });
       res.json({ message: "View followers stories task started" });
@@ -577,7 +671,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/actions/view-following-stories", async (req, res) => {
+  app.post("/api/actions/view-following-stories", requireValidSession, async (req, res) => {
     try {
       await executeAction("view-stories", { type: "following" });
       res.json({ message: "View following stories task started" });
@@ -585,6 +679,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const status = error.status || 500;
       const message = error.message || "Failed to start view following stories task";
       res.status(status).json({ message });
+    }
+  });
+
+  // CRITICAL: Missing test-session endpoint implementation
+  app.post("/api/users/:id/test-session", async (req, res) => {
+    try {
+      const userId = req.params.id;
+      
+      // Validate user exists
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: "User not found",
+          message: `User with ID ${userId} does not exist`
+        });
+      }
+
+      // Get Instagram credentials
+      const credentials = await storage.getInstagramCredentials();
+      if (!credentials) {
+        return res.status(400).json({
+          success: false,
+          error: "Credentials not configured",
+          message: "Instagram credentials must be configured before testing session"
+        });
+      }
+
+      // Test connection by calling the Python bot API
+      try {
+        const response = await fetch("http://127.0.0.1:5000/api/bot/test-connection", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-User-ID": userId
+          },
+          body: JSON.stringify({
+            username: credentials.username,
+            // Note: password should be decrypted if encrypted in storage
+            test_only: true
+          })
+        });
+
+        const result = await response.json();
+        
+        if (result.success) {
+          // Update user session as valid
+          await storage.updateSessionValidity(
+            userId, 
+            true, 
+            undefined, 
+            "Session test successful",
+            result.instagram_username || credentials.username
+          );
+
+          return res.status(200).json({
+            success: true,
+            message: "Instagram session is valid",
+            instagram_username: result.instagram_username || credentials.username,
+            tested_at: new Date().toISOString()
+          });
+        } else {
+          // Update user session as invalid
+          await storage.updateSessionValidity(
+            userId, 
+            false, 
+            result.error_code || "TEST_FAILED", 
+            result.message || "Session test failed",
+            undefined
+          );
+
+          return res.status(401).json({
+            success: false,
+            error: "Session test failed",
+            message: result.message || "Instagram session is invalid",
+            error_code: result.error_code,
+            requires_reauth: true
+          });
+        }
+      } catch (fetchError: any) {
+        // Update user session as invalid due to connection error
+        await storage.updateSessionValidity(
+          userId, 
+          false, 
+          "CONNECTION_ERROR", 
+          `Failed to test session: ${fetchError.message}`,
+          undefined
+        );
+
+        return res.status(503).json({
+          success: false,
+          error: "Service unavailable",
+          message: "Could not connect to Instagram authentication service",
+          requires_reauth: true
+        });
+      }
+
+    } catch (error: any) {
+      console.error("Session test error:", error);
+      
+      // Update user session as invalid due to server error
+      try {
+        await storage.updateSessionValidity(
+          req.params.id, 
+          false, 
+          "SERVER_ERROR", 
+          `Server error during session test: ${error.message}`,
+          undefined
+        );
+      } catch (updateError) {
+        console.error("Failed to update session validity:", updateError);
+      }
+
+      return res.status(500).json({
+        success: false,
+        error: "Internal server error",
+        message: error.message || "Failed to test session"
+      });
     }
   });
 

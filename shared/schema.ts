@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -77,6 +77,28 @@ export const instagramCredentials = pgTable("instagram_credentials", {
   updated_at: timestamp("updated_at").defaultNow(),
 });
 
+export const userBotStatus = pgTable("user_bot_status", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  user_id: varchar("user_id").notNull().references(() => users.id),
+  instagram_username: text("instagram_username"),
+  session_valid: boolean("session_valid").default(false),
+  last_tested: timestamp("last_tested"),
+  bot_running: boolean("bot_running").default(false),
+  last_error_code: text("last_error_code"),
+  last_error_message: text("last_error_message"),
+}, (table) => ({
+  uniqueUserId: unique().on(table.user_id),
+}));
+
+export const botInstances = pgTable("bot_instances", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  user_id: varchar("user_id").notNull().references(() => users.id).unique(),
+  sqlite_db_path: text("sqlite_db_path").notNull(),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+  is_active: boolean("is_active").default(true),
+});
+
 // Schemas for validation
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
@@ -111,6 +133,37 @@ export const insertInstagramCredentialsSchema = createInsertSchema(instagramCred
   password: true,
 });
 
+export const insertUserBotStatusSchema = createInsertSchema(userBotStatus).pick({
+  user_id: true,
+  instagram_username: true,
+  session_valid: true,
+  last_tested: true,
+  bot_running: true,
+  last_error_code: true,
+  last_error_message: true,
+});
+
+export const updateUserBotStatusSchema = createInsertSchema(userBotStatus).pick({
+  instagram_username: true,
+  session_valid: true,
+  last_tested: true,
+  bot_running: true,
+  last_error_code: true,
+  last_error_message: true,
+});
+
+export const insertBotInstanceSchema = createInsertSchema(botInstances).pick({
+  user_id: true,
+  sqlite_db_path: true,
+  is_active: true,
+});
+
+export const updateBotInstanceSchema = createInsertSchema(botInstances).pick({
+  sqlite_db_path: true,
+  updated_at: true,
+  is_active: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect & {
@@ -138,3 +191,9 @@ export type InsertDMTemplate = z.infer<typeof insertDMTemplateSchema>;
 export type UpdateDailyLimits = z.infer<typeof updateDailyLimitsSchema>;
 export type InsertInstagramCredentials = z.infer<typeof insertInstagramCredentialsSchema>;
 export type InstagramCredentials = typeof instagramCredentials.$inferSelect;
+export type InsertUserBotStatus = z.infer<typeof insertUserBotStatusSchema>;
+export type UpdateUserBotStatus = z.infer<typeof updateUserBotStatusSchema>;
+export type UserBotStatus = typeof userBotStatus.$inferSelect;
+export type InsertBotInstance = z.infer<typeof insertBotInstanceSchema>;
+export type UpdateBotInstance = z.infer<typeof updateBotInstanceSchema>;
+export type BotInstance = typeof botInstances.$inferSelect;
