@@ -811,19 +811,18 @@ def login():
         }), 500
 
 @app.route('/api/auth/logout', methods=['POST'])
-@require_user
 def logout():
     """Logout user"""
     try:
         session.clear()
         return jsonify({
             "success": True,
-            "message": "Logout successful"
+            "message": "Logged out successfully"
         })
     except Exception as e:
         return jsonify({
             "success": False,
-            "error": "E-AUTH-ERROR",
+            "error": "E-AUTH-LOGOUT-ERROR",
             "message": str(e)
         }), 500
 
