@@ -53,21 +53,19 @@ class InstagramBot:
         self.running = False
         
     def initialize(self) -> bool:
-        """Initialize all bot components"""
+        """Initialize bot components - DOES NOT start automation automatically"""
         try:
-            # Initialize database
+            # Initialize database only
             init_database()
             log.info("Database initialized")
             
-            # Initialize Instagram authentication
-            if not self.auth.login():
-                log.error("Failed to login to Instagram")
-                return False
+            # SECURITY: Do NOT automatically login or start automation
+            # This must be done explicitly via API calls with proper authentication
+            log.info("Bot initialized - login and automation start required via API")
             
-            
-            # Initialize scheduler
+            # Initialize scheduler but don't start it
             self.scheduler = BotScheduler(self)
-            log.info("Scheduler initialized")
+            log.info("Scheduler initialized (not started)")
             
             return True
             

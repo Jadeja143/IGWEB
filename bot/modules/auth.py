@@ -13,6 +13,9 @@ from typing import Optional, Dict, Any
 from instagrapi import Client
 from instagrapi.exceptions import ClientError, BadPassword, ChallengeRequired, LoginRequired
 
+# SECURITY: Exponential backoff for login failures
+LOGIN_FAILURE_BACKOFF = {}  # username -> (failure_count, last_attempt_time)
+
 log = logging.getLogger(__name__)
 
 class InstagramAuth:
@@ -45,7 +48,7 @@ class InstagramAuth:
     
     def login(self, username: str, password: str, verification_code: Optional[str] = None) -> Dict[str, Any]:
         """
-        Secure login to Instagram - credentials are not stored
+        Secure login to Instagram with exponential backoff protection
         Returns login result with session information
         """
         if not username or not password:
@@ -53,6 +56,16 @@ class InstagramAuth:
                 "success": False,
                 "error": "Username and password are required",
                 "requires_verification": False
+            }
+        
+        # SECURITY: Check exponential backoff to prevent Instagram challenges
+        backoff_result = self._check_login_backoff(username)
+        if not backoff_result["allowed"]:
+            return {
+                "success": False,
+                "error": f"Login rate limited. Try again in {backoff_result['retry_after']} seconds",
+                "requires_verification": False,
+                "retry_after": backoff_result["retry_after"]
             }
         
         try:

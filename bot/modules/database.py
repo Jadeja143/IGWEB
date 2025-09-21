@@ -253,43 +253,68 @@ def get_hashtags() -> List[Tuple[str, int]]:
 # ==============================================================================
 
 def unified_increment_limit(action: str, amount: int = 1) -> bool:
-    """Increment daily limit using Node.js API (unified with frontend)"""
+    """ATOMIC increment daily limit - RACE CONDITION PROTECTION"""
     try:
-        today = date.today().isoformat()
-        
-        # Get current stats
-        response = requests.get(f"{NODE_API_URL}/api/stats/daily?date={today}", timeout=5)
-        if response.status_code == 200:
-            current_stats = response.json()
-        else:
-            # If stats don't exist, they'll be created with default values
-            current_stats = {
-                "follows": 0, "unfollows": 0, "likes": 0, 
-                "dms": 0, "story_views": 0
+        # SECURITY FIX: Use atomic increment endpoint to prevent race conditions
+        # This prevents multiple threads from corrupting counter values
+        response = requests.post(f"{NODE_API_URL}/api/stats/increment",
+            json={action: amount},
+            timeout=5,
+            headers={
+                "Content-Type": "application/json",
+                "X-Operation-Type": "atomic-increment"
             }
-        
-        # Increment the specific action
-        if action in current_stats:
-            current_stats[action] = current_stats.get(action, 0) + amount
-        
-        # Update stats via API
-        update_response = requests.post(
-            f"{NODE_API_URL}/api/stats/daily",
-            json={"date": today, **current_stats},
-            timeout=5
         )
         
-        if update_response.status_code == 200:
-            log.debug(f"Successfully incremented {action} by {amount}")
+        if response.status_code == 200:
+            result = response.json()
+            log.debug(f"Atomic increment {action} by {amount}: new value = {result.get(action, 'unknown')}")
             return True
         else:
-            log.warning(f"Failed to increment {action}: {update_response.status_code}")
-            return False
+            log.warning(f"Failed atomic increment {action}: {response.status_code}")
+            # Fallback to local atomic increment for resilience
+            return _atomic_increment_fallback(action, amount)
             
     except Exception as e:
-        log.error(f"Error incrementing {action} via unified API: {e}")
-        # Fallback to SQLite for reliability
-        increment_limit(action, amount)
+        log.error(f"Error in atomic increment {action}: {e}")
+        # Always fallback to local atomic operation for reliability
+        return _atomic_increment_fallback(action, amount)
+
+def _atomic_increment_fallback(action: str, amount: int = 1) -> bool:
+    """Fallback atomic increment using SQLite with proper locking - RACE CONDITION SAFE"""
+    try:
+        with db_lock:  # Critical section - prevents race conditions
+            today = date.today().isoformat()
+            
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                
+                # ATOMIC: Use ON CONFLICT with UPDATE for thread-safe increment
+                cur.execute(f"""
+                    INSERT INTO daily_limits (day, follows, unfollows, likes, dms, story_views) 
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(day) DO UPDATE SET 
+                    {action} = {action} + ?
+                """, (
+                    today, 
+                    amount if action == 'follows' else 0,
+                    amount if action == 'unfollows' else 0, 
+                    amount if action == 'likes' else 0,
+                    amount if action == 'dms' else 0,
+                    amount if action == 'story_views' else 0,
+                    amount  # The increment amount for UPDATE
+                ))
+                
+                # Get the new value
+                cur.execute(f"SELECT {action} FROM daily_limits WHERE day = ?", (today,))
+                result = cur.fetchone()
+                new_value = result[0] if result else amount
+                
+                log.debug(f"Fallback atomic increment {action}: new value = {new_value}")
+                return True
+                
+    except Exception as e:
+        log.error(f"Fallback atomic increment failed for {action}: {e}")
         return False
 
 def unified_get_limits() -> Dict[str, int]:

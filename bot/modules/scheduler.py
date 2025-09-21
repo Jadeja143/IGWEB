@@ -8,6 +8,13 @@ import logging
 import threading
 import schedule
 from datetime import datetime
+try:
+    from ..core.controller import get_bot_controller
+    from ..core.state import BotState
+except ImportError:
+    # Fallback for import issues
+    get_bot_controller = None
+    BotState = None
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +75,11 @@ class BotScheduler:
     def _cleanup_old_follows(self):
         """Scheduled task: cleanup old follows"""
         try:
+            # SECURITY: Check bot state before running automation
+            if not self._can_run_automation():
+                log.info("Skipping cleanup - bot not in running state")
+                return
+                
             log.info("Running scheduled cleanup of old follows")
             result = self.bot_controller.follow_module.unfollow_old(days_threshold=7)
             log.info("Cleanup result: %s", result)
@@ -77,6 +89,11 @@ class BotScheduler:
     def _like_followers_task(self):
         """Scheduled task: like followers posts"""
         try:
+            # SECURITY: Check bot state before running automation
+            if not self._can_run_automation():
+                log.info("Skipping like task - bot not in running state")
+                return
+                
             log.info("Running scheduled like followers task")
             result = self.bot_controller.like_module.like_followers_posts(likes_per_user=2)
             log.info("Like followers result: %s", result)
@@ -86,6 +103,11 @@ class BotScheduler:
     def _view_stories_task(self):
         """Scheduled task: view stories"""
         try:
+            # SECURITY: Check bot state before running automation
+            if not self._can_run_automation():
+                log.info("Skipping stories task - bot not in running state")
+                return
+                
             log.info("Running scheduled view stories task")
             result = self.bot_controller.story_module.view_followers_stories()
             log.info("View stories result: %s", result)
@@ -103,6 +125,11 @@ class BotScheduler:
                 log.info("No default hashtags configured for scheduled follow")
                 return
             
+            # SECURITY: Check bot state before running automation
+            if not self._can_run_automation():
+                log.info("Skipping follow task - bot not in running state")
+                return
+                
             for hashtag_row in hashtags:
                 hashtag = hashtag_row[0]
                 log.info("Running scheduled follow for hashtag: %s", hashtag)
@@ -113,6 +140,37 @@ class BotScheduler:
         except Exception as e:
             log.exception("Error in scheduled follow hashtag: %s", e)
     
+    def _can_run_automation(self) -> bool:
+        """
+        SECURITY CHECK: Verify bot is in correct state to run automation.
+        This prevents automation from running when not logged in or not authorized.
+        """
+        try:
+            # Try to get centralized bot controller
+            if get_bot_controller and BotState:
+                controller = get_bot_controller()
+                if controller and hasattr(controller, 'ensure_running'):
+                    is_running = controller.ensure_running()
+                    if not is_running:
+                        current_state = controller.state if hasattr(controller, 'state') else 'unknown'
+                        log.warning("Automation blocked - bot state: %s", current_state)
+                    return is_running
+            
+            # Fallback: check traditional auth if new system not available
+            if hasattr(self.bot_controller, 'auth'):
+                is_logged_in = self.bot_controller.auth.is_logged_in()
+                if not is_logged_in:
+                    log.warning("Automation blocked - not logged in to Instagram")
+                return is_logged_in
+            
+            # If no auth check available, block for safety
+            log.warning("Automation blocked - no authentication check available")
+            return False
+            
+        except Exception as e:
+            log.error("Error checking automation permissions: %s", e)
+            return False  # Fail safe - block automation if check fails
+
     def add_custom_task(self, schedule_string: str, task_name: str, task_func, *args, **kwargs):
         """Add a custom scheduled task"""
         try:
