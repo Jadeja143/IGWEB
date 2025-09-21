@@ -51,7 +51,8 @@ export default function UserManagement() {
   const { data: users = [] } = useQuery<User[]>({
     queryKey: ["/api/users"],
     queryFn: async () => {
-      return await apiRequest("GET", "/api/users");
+      const response = await apiRequest("GET", "/api/users");
+      return response.json();
     },
   });
 
@@ -143,7 +144,7 @@ export default function UserManagement() {
     }
   };
 
-  const filteredUsers = users?.filter(user =>
+  const filteredUsers = (users as User[])?.filter((user: User) =>
     user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
     user.email.toLowerCase().includes(searchTerm.toLowerCase())
   ) || [];
