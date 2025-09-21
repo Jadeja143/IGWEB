@@ -104,7 +104,6 @@ def get_bot_stats():
                 "initialized": status.get("initialized", False),
                 "running": status.get("running", False),
                 "instagram_connected": status.get("instagram_connected", False),
-                "telegram_connected": status.get("telegram_connected", False),
                 "modules_loaded": status.get("modules_loaded", False)
             }
             return stats

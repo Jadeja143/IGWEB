@@ -3,7 +3,7 @@
 
 """
 Instagram Automation Bot - Main Controller
-Modular Instagram bot with Telegram control and web dashboard integration
+Modular Instagram bot with web dashboard integration
 """
 
 import os
@@ -18,7 +18,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'modules'))
 
 from modules.database import init_database
 from modules.auth import InstagramAuth
-from modules.telegram_bot import TelegramBot
 from modules.scheduler import BotScheduler
 from modules.follow import FollowModule
 from modules.like import LikeModule
@@ -36,7 +35,6 @@ log = logging.getLogger("instagram-bot")
 # Disable noisy HTTP logs
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
-logging.getLogger("telegram").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("requests").setLevel(logging.WARNING)
 
@@ -51,7 +49,6 @@ class InstagramBot:
         self.dm_module = DMModule(self.auth)
         self.location_module = LocationModule(self.auth)
         
-        self.telegram_bot = None
         self.scheduler = None
         self.running = False
         
@@ -67,19 +64,6 @@ class InstagramBot:
                 log.error("Failed to login to Instagram")
                 return False
             
-            # Initialize Telegram bot
-            telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-            admin_user_id = int(os.environ.get("ADMIN_USER_ID", "0"))
-            
-            if telegram_token and admin_user_id:
-                self.telegram_bot = TelegramBot(
-                    token=telegram_token,
-                    admin_user_id=admin_user_id,
-                    bot_controller=self
-                )
-                log.info("Telegram bot initialized")
-            else:
-                log.warning("Telegram credentials not provided - bot will run without Telegram control")
             
             # Initialize scheduler
             self.scheduler = BotScheduler(self)
@@ -101,11 +85,6 @@ class InstagramBot:
         log.info("Instagram Bot started successfully")
         
         try:
-            # Start Telegram bot in separate thread
-            if self.telegram_bot:
-                telegram_thread = threading.Thread(target=self.telegram_bot.start)
-                telegram_thread.daemon = True
-                telegram_thread.start()
             
             # Start scheduler
             if self.scheduler:
@@ -129,8 +108,6 @@ class InstagramBot:
         if self.scheduler:
             self.scheduler.stop()
         
-        if self.telegram_bot:
-            self.telegram_bot.stop()
         
         log.info("Instagram Bot stopped")
     
@@ -139,7 +116,6 @@ class InstagramBot:
         return {
             "running": self.running,
             "instagram_connected": self.auth.is_logged_in(),
-            "telegram_connected": self.telegram_bot.is_running() if self.telegram_bot else False,
             "modules": {
                 "follow": True,
                 "like": True,

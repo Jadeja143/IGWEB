@@ -22,7 +22,7 @@ class InstagramAuth:
         self.client_lock = threading.Lock()
         self._logged_in = False
     
-    def login(self, username: Optional[str] = None, password: Optional[str] = None) -> bool:
+    def login(self, username: Optional[str] = None, password: Optional[str] = None, verification_code: Optional[str] = None) -> bool:
         """Login to Instagram"""
         username = username or os.environ.get("IG_USERNAME")
         password = password or os.environ.get("IG_PASSWORD")
@@ -41,6 +41,11 @@ class InstagramAuth:
                 
                 # Perform fresh login
                 log.info("Performing fresh Instagram login for %s", username)
+                
+                # Handle 2FA if verification code is provided
+                if verification_code:
+                    self.client.challenge_code_handler = lambda: verification_code
+                
                 self.client.login(username, password)
                 self._save_session()
                 self._logged_in = True
@@ -51,8 +56,11 @@ class InstagramAuth:
             log.error("Invalid Instagram password")
             return False
         except ChallengeRequired as e:
-            log.error("Instagram challenge required: %s", e)
-            return False
+            log.error("Instagram challenge required (2FA): %s", e)
+            # For proper 2FA handling, we should return more information about the challenge
+            # but for now, we'll just log and return False
+            # In a real application, you would handle this by prompting the user for 2FA code
+            raise Exception(f"2FA verification required. Please check your Instagram app or email for verification code. Error: {str(e)}")
         except ClientError as e:
             log.error("Instagram client error: %s", e)
             return False
