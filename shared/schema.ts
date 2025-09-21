@@ -147,7 +147,7 @@ export const errorCodes = pgTable("error_codes", {
 // Schemas for validation
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
-  password: true,
+  password_hash: true,
 });
 
 export const insertHashtagSchema = createInsertSchema(hashtags).pick({
@@ -175,7 +175,7 @@ export const updateDailyLimitsSchema = createInsertSchema(dailyLimits).pick({
 
 export const insertInstagramCredentialsSchema = createInsertSchema(instagramCredentials).pick({
   username: true,
-  password: true,
+  password_encrypted: true,
 });
 
 export const insertUserBotStatusSchema = createInsertSchema(userBotStatus).pick({

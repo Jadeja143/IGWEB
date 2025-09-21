@@ -218,12 +218,249 @@ def require_valid_session(f):
                 }), 500
     return decorated_function
 
+def require_admin(f):
+    """Decorator to require admin role"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        try:
+            # First require app authentication
+            user_id = get_user_id_from_request()
+            g.user_id = user_id
+            
+            # Check user role
+            conn = get_db_connection()
+            if not conn:
+                return jsonify({
+                    "success": False,
+                    "error": "E-DB-CONNECTION",
+                    "message": "Database connection failed"
+                }), 500
+            
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+                result = cursor.fetchone()
+                
+                if not result or result[0] != 'admin':
+                    return jsonify({
+                        "success": False,
+                        "error": "E-AUTH-INSUFFICIENT-PERMISSIONS",
+                        "message": "Admin access required"
+                    }), 403
+                
+                return f(*args, **kwargs)
+                
+            except Exception as e:
+                return jsonify({
+                    "success": False,
+                    "error": "E-AUTH-ROLE-ERROR",
+                    "message": str(e)
+                }), 500
+            finally:
+                conn.close()
+            
+        except Exception as e:
+            if str(e).startswith("E-AUTH-REQUIRED"):
+                return jsonify({
+                    "success": False,
+                    "error": "E-AUTH-REQUIRED",
+                    "message": "Please log in to access this resource"
+                }), 401
+            else:
+                return jsonify({
+                    "success": False,
+                    "error": "E-AUTH-ERROR",
+                    "message": str(e)
+                }), 500
+    return decorated_function
+
 # Configure Flask session secret key for security
 # SECURITY: SESSION_SECRET is required and must never default to a predictable value
 SESSION_SECRET = os.environ.get('SESSION_SECRET')
 if not SESSION_SECRET:
     raise RuntimeError("CRITICAL SECURITY ERROR: SESSION_SECRET environment variable must be set for secure session management. Never use default secrets in production.")
 app.secret_key = SESSION_SECRET
+
+# Configure secure session settings
+app.config.update(
+    SESSION_COOKIE_SECURE=True,  # Only send over HTTPS
+    SESSION_COOKIE_HTTPONLY=True,  # Prevent XSS access to session cookie
+    SESSION_COOKIE_SAMESITE='Lax',  # CSRF protection
+    PERMANENT_SESSION_LIFETIME=1800  # 30 minutes session timeout
+)
+
+# ================================
+# CSRF PROTECTION
+# ================================
+
+import secrets
+
+def generate_csrf_token():
+    """Generate a secure CSRF token"""
+    return secrets.token_urlsafe(32)
+
+def get_csrf_token():
+    """Get or create CSRF token for current session"""
+    if 'csrf_token' not in session:
+        session['csrf_token'] = generate_csrf_token()
+    return session['csrf_token']
+
+def verify_csrf_token(token):
+    """Verify CSRF token matches session token"""
+    return token and 'csrf_token' in session and secrets.compare_digest(session['csrf_token'], token)
+
+@app.route('/api/csrf-token')
+def csrf_token():
+    """Endpoint to get CSRF token for authenticated users"""
+    try:
+        if 'user_id' not in session:
+            return jsonify({
+                "success": False,
+                "error": "E-AUTH-REQUIRED",
+                "message": "Authentication required"
+            }), 401
+        
+        return jsonify({
+            "success": True,
+            "csrf_token": get_csrf_token()
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": "E-CSRF-ERROR", 
+            "message": str(e)
+        }), 500
+
+def require_csrf(f):
+    """Decorator to require CSRF token for POST/PUT/DELETE requests"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.method in ['POST', 'PUT', 'DELETE', 'PATCH']:
+            # Get CSRF token from header or form data
+            csrf_token = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token')
+            if request.is_json:
+                data = request.get_json()
+                csrf_token = csrf_token or (data.get('csrf_token') if data else None)
+            
+            if not verify_csrf_token(csrf_token):
+                return jsonify({
+                    "success": False,
+                    "error": "E-CSRF-INVALID",
+                    "message": "Invalid or missing CSRF token"
+                }), 403
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ================================
+# DAILY LIMITS ENFORCEMENT
+# ================================
+
+def check_daily_limits(user_id, action_type, amount=1):
+    """Check if user has reached daily limits for specific action"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return False, "Database connection failed"
+        
+        cursor = conn.cursor()
+        
+        # Get current daily stats for user
+        today = datetime.now().date()
+        cursor.execute("""
+            SELECT follows, likes, dms, story_views 
+            FROM daily_stats 
+            WHERE user_id = %s AND date = %s
+        """, (user_id, today))
+        
+        stats = cursor.fetchone()
+        current_follows = stats[0] if stats else 0
+        current_likes = stats[1] if stats else 0
+        current_dms = stats[2] if stats else 0
+        current_stories = stats[3] if stats else 0
+        
+        # Get daily limits for user (or defaults)
+        cursor.execute("""
+            SELECT follows_limit, likes_limit, dms_limit, story_views_limit
+            FROM daily_limits 
+            WHERE user_id = %s
+        """, (user_id,))
+        
+        limits = cursor.fetchone()
+        if not limits:
+            # Use default limits if no user-specific limits set
+            follows_limit = 50
+            likes_limit = 100
+            dms_limit = 20
+            stories_limit = 100
+        else:
+            follows_limit = limits[0]
+            likes_limit = limits[1]  
+            dms_limit = limits[2]
+            stories_limit = limits[3]
+        
+        # Check limits based on action type
+        if action_type == 'follow' and current_follows + amount > follows_limit:
+            return False, f"Daily follow limit reached ({current_follows}/{follows_limit})"
+        elif action_type == 'like' and current_likes + amount > likes_limit:
+            return False, f"Daily like limit reached ({current_likes}/{likes_limit})"
+        elif action_type == 'dm' and current_dms + amount > dms_limit:
+            return False, f"Daily DM limit reached ({current_dms}/{dms_limit})"
+        elif action_type == 'story' and current_stories + amount > stories_limit:
+            return False, f"Daily story view limit reached ({current_stories}/{stories_limit})"
+        
+        conn.close()
+        return True, "Within limits"
+        
+    except Exception as e:
+        return False, f"Error checking limits: {str(e)}"
+
+def increment_daily_counter(user_id, action_type, amount=1):
+    """Increment daily counter for specific action"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return False
+        
+        cursor = conn.cursor()
+        today = datetime.now().date()
+        
+        # Upsert daily stats record
+        if action_type == 'follow':
+            cursor.execute("""
+                INSERT INTO daily_stats (user_id, date, follows)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, date) DO UPDATE SET
+                follows = daily_stats.follows + %s
+            """, (user_id, today, amount, amount))
+        elif action_type == 'like':
+            cursor.execute("""
+                INSERT INTO daily_stats (user_id, date, likes)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, date) DO UPDATE SET
+                likes = daily_stats.likes + %s
+            """, (user_id, today, amount, amount))
+        elif action_type == 'dm':
+            cursor.execute("""
+                INSERT INTO daily_stats (user_id, date, dms)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, date) DO UPDATE SET
+                dms = daily_stats.dms + %s
+            """, (user_id, today, amount, amount))
+        elif action_type == 'story':
+            cursor.execute("""
+                INSERT INTO daily_stats (user_id, date, story_views)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, date) DO UPDATE SET
+                story_views = daily_stats.story_views + %s
+            """, (user_id, today, amount, amount))
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        return False
 
 # ================================
 # BOT INSTANCE MANAGER
@@ -431,13 +668,13 @@ def register():
                     "message": "Username already exists"
                 }), 400
             
-            # Hash password
-            import hashlib
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            # Hash password securely
+            from werkzeug.security import generate_password_hash
+            password_hash = generate_password_hash(password)
             
             # Insert new user
             cursor.execute("""
-                INSERT INTO users (username, password) 
+                INSERT INTO users (username, password_hash) 
                 VALUES (%s, %s) 
                 RETURNING id
             """, (username, password_hash))
@@ -445,7 +682,10 @@ def register():
             user_id = cursor.fetchone()[0]
             conn.commit()
             
-            # Create session
+            # Regenerate session ID to prevent session fixation
+            session.permanent = True
+            # Clear old session data and create new session
+            session.clear()
             session['user_id'] = user_id
             
             return jsonify({
@@ -501,7 +741,7 @@ def login():
             cursor = conn.cursor()
             
             # Get user by username
-            cursor.execute("SELECT id, password FROM users WHERE username = %s", (username,))
+            cursor.execute("SELECT id, password_hash FROM users WHERE username = %s", (username,))
             result = cursor.fetchone()
             
             if not result:
@@ -513,18 +753,20 @@ def login():
             
             user_id, stored_password = result
             
-            # Verify password
-            import hashlib
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            # Verify password securely
+            from werkzeug.security import check_password_hash
             
-            if password_hash != stored_password:
+            if not check_password_hash(stored_password, password):
                 return jsonify({
                     "success": False,
                     "error": "E-AUTH-INVALID-CREDENTIALS",
                     "message": "Invalid username or password"
                 }), 401
             
-            # Create session
+            # Regenerate session ID to prevent session fixation
+            session.permanent = True
+            # Clear old session data and create new session
+            session.clear()
             session['user_id'] = user_id
             
             return jsonify({
@@ -689,6 +931,7 @@ def get_bot_status():
         }), 500
 
 @app.route('/api/bot/credentials', methods=['POST'])
+@require_csrf
 @require_user
 def save_instagram_credentials():
     """Save Instagram credentials for current user"""
@@ -846,6 +1089,7 @@ def test_instagram_connection():
         }), 500
 
 @app.route('/api/bot/start', methods=['POST'])
+@require_csrf
 @require_valid_session
 def start_bot():
     """Start bot for current user"""
@@ -886,6 +1130,7 @@ def start_bot():
         }), 500
 
 @app.route('/api/bot/stop', methods=['POST'])
+@require_csrf
 @require_user
 def stop_bot():
     """Stop bot for current user"""
@@ -1052,11 +1297,26 @@ def get_daily_limits():
         if conn:
             try:
                 cursor = conn.cursor()
+                user_id = g.user_id
+                
+                # First check for user-specific limits
                 cursor.execute("""
                     SELECT follows_limit, unfollows_limit, likes_limit, dms_limit, story_views_limit
                     FROM daily_limits 
+                    WHERE user_id = %s
                     LIMIT 1
-                """)
+                """, (user_id,))
+                
+                result = cursor.fetchone()
+                
+                # If no user-specific limits, check for global defaults (user_id = NULL)
+                if not result:
+                    cursor.execute("""
+                        SELECT follows_limit, unfollows_limit, likes_limit, dms_limit, story_views_limit
+                        FROM daily_limits 
+                        WHERE user_id IS NULL
+                        LIMIT 1
+                    """)
                 
                 result = cursor.fetchone()
                 if result:
@@ -1086,7 +1346,8 @@ def get_daily_limits():
         }), 500
 
 @app.route('/api/limits', methods=['PUT'])
-@require_user
+@require_csrf
+@require_admin
 def update_daily_limits():
     """Update daily limits"""
     try:
@@ -1108,18 +1369,21 @@ def update_daily_limits():
         
         try:
             cursor = conn.cursor()
+            user_id = g.user_id
             
-            # Update or insert limits
+            # Update or insert user-specific limits
             cursor.execute("""
-                INSERT INTO daily_limits (follows_limit, unfollows_limit, likes_limit, dms_limit, story_views_limit)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
+                INSERT INTO daily_limits (user_id, follows_limit, unfollows_limit, likes_limit, dms_limit, story_views_limit)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
                     follows_limit = EXCLUDED.follows_limit,
                     unfollows_limit = EXCLUDED.unfollows_limit,
                     likes_limit = EXCLUDED.likes_limit,
                     dms_limit = EXCLUDED.dms_limit,
-                    story_views_limit = EXCLUDED.story_views_limit
+                    story_views_limit = EXCLUDED.story_views_limit,
+                    updated_at = NOW()
             """, (
+                user_id,
                 data.get('follows_limit', 50),
                 data.get('unfollows_limit', 50),
                 data.get('likes_limit', 200),
@@ -1147,6 +1411,157 @@ def update_daily_limits():
         return jsonify({
             "success": False,
             "error": "E-LIMITS-ERROR",
+            "message": str(e)
+        }), 500
+
+# ================================
+# ADMIN USER MANAGEMENT ENDPOINTS
+# ================================
+
+@app.route('/api/users', methods=['GET'])
+@require_admin
+def get_users():
+    """Get all users (admin only)"""
+    try:
+        conn = get_db_connection()
+        users = []
+        
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, username, role, created_at 
+                    FROM users 
+                    ORDER BY created_at DESC
+                """)
+                
+                for row in cursor.fetchall():
+                    users.append({
+                        "id": row[0],
+                        "username": row[1],
+                        "role": row[2],
+                        "created_at": row[3].isoformat() if row[3] else None
+                    })
+                    
+            except Exception as e:
+                print(f"Error getting users: {e}")
+            finally:
+                conn.close()
+        
+        return jsonify({
+            "success": True,
+            "users": users
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": "E-USERS-ERROR",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/users', methods=['POST'])
+@require_csrf
+@require_admin
+def create_user():
+    """Create new user (admin only)"""
+    try:
+        data = request.get_json()
+        if not data or 'username' not in data or 'password' not in data:
+            return jsonify({
+                "success": False,
+                "error": "E-USER-INVALID-DATA",
+                "message": "Username and password required"
+            }), 400
+        
+        username = data['username'].strip()
+        password = data['password']
+        role = data.get('role', 'user')  # Default to 'user' role
+        
+        # Validate input
+        if not username or len(username) < 3:
+            return jsonify({
+                "success": False,
+                "error": "E-USER-INVALID-USERNAME",
+                "message": "Username must be at least 3 characters"
+            }), 400
+        
+        if not password or len(password) < 6:
+            return jsonify({
+                "success": False,
+                "error": "E-USER-INVALID-PASSWORD",
+                "message": "Password must be at least 6 characters"
+            }), 400
+        
+        if role not in ['admin', 'user', 'viewer']:
+            return jsonify({
+                "success": False,
+                "error": "E-USER-INVALID-ROLE",
+                "message": "Role must be admin, user, or viewer"
+            }), 400
+        
+        # Connect to database
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({
+                "success": False,
+                "error": "E-DB-CONNECTION",
+                "message": "Database connection failed"
+            }), 500
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Check if username already exists
+            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+            if cursor.fetchone():
+                return jsonify({
+                    "success": False,
+                    "error": "E-USER-USERNAME-EXISTS",
+                    "message": "Username already exists"
+                }), 400
+            
+            # Hash password securely
+            from werkzeug.security import generate_password_hash
+            password_hash = generate_password_hash(password)
+            
+            # Insert new user
+            cursor.execute("""
+                INSERT INTO users (username, password_hash, role) 
+                VALUES (%s, %s, %s) 
+                RETURNING id, created_at
+            """, (username, password_hash, role))
+            
+            result = cursor.fetchone()
+            if not result:
+                raise Exception("Failed to create user")
+            user_id, created_at = result
+            conn.commit()
+            
+            return jsonify({
+                "success": True,
+                "message": "User created successfully",
+                "user": {
+                    "id": user_id,
+                    "username": username,
+                    "role": role,
+                    "created_at": created_at.isoformat() if created_at else None
+                }
+            })
+            
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "error": "E-USER-CREATE-ERROR",
+                "message": str(e)
+            }), 500
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": "E-USER-ERROR",
             "message": str(e)
         }), 500
 
@@ -1193,6 +1608,7 @@ def get_hashtags():
         }), 500
 
 @app.route('/api/hashtags', methods=['POST'])
+@require_csrf
 @require_user
 def add_hashtag():
     """Add new hashtag"""
@@ -1231,7 +1647,10 @@ def add_hashtag():
                 RETURNING id, created_at
             """, (tag, tier))
             
-            hashtag_id, created_at = cursor.fetchone()
+            result = cursor.fetchone()
+            if not result:
+                raise Exception("Failed to create hashtag")
+            hashtag_id, created_at = result
             conn.commit()
             
             return jsonify({
