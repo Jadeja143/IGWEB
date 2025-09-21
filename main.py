@@ -976,7 +976,66 @@ def get_dashboard_stats():
             "message": str(e)
         }), 500
 
-@app.route('/api/dashboard/limits', methods=['GET'])
+@app.route('/api/stats/daily', methods=['GET'])
+@require_user
+def get_daily_stats():
+    """Get daily stats for current user"""
+    try:
+        user_id = g.user_id
+        
+        # Get today's date
+        from datetime import datetime
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        conn = get_db_connection()
+        stats = {
+            "follows": 0,
+            "unfollows": 0,
+            "likes": 0,
+            "dms": 0,
+            "story_views": 0,
+            "date": today
+        }
+        
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT follows, unfollows, likes, dms, story_views
+                    FROM daily_stats 
+                    WHERE user_id = %s AND date = %s
+                    LIMIT 1
+                """, (user_id, today))
+                
+                result = cursor.fetchone()
+                if result:
+                    stats = {
+                        "follows": result[0] or 0,
+                        "unfollows": result[1] or 0,
+                        "likes": result[2] or 0,
+                        "dms": result[3] or 0,
+                        "story_views": result[4] or 0,
+                        "date": today
+                    }
+                    
+            except Exception as e:
+                print(f"Error getting daily stats: {e}")
+            finally:
+                conn.close()
+        
+        return jsonify({
+            "success": True,
+            **stats
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": "E-STATS-ERROR",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/limits', methods=['GET'])
 @require_user
 def get_daily_limits():
     """Get daily limits"""
@@ -1026,7 +1085,7 @@ def get_daily_limits():
             "message": str(e)
         }), 500
 
-@app.route('/api/dashboard/limits', methods=['PUT'])
+@app.route('/api/limits', methods=['PUT'])
 @require_user
 def update_daily_limits():
     """Update daily limits"""
