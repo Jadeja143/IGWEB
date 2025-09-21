@@ -219,7 +219,11 @@ def require_valid_session(f):
     return decorated_function
 
 # Configure Flask session secret key for security
-app.secret_key = os.environ.get('SESSION_SECRET', 'dev-secret-key-change-in-production')
+# SECURITY: SESSION_SECRET is required and must never default to a predictable value
+SESSION_SECRET = os.environ.get('SESSION_SECRET')
+if not SESSION_SECRET:
+    raise RuntimeError("CRITICAL SECURITY ERROR: SESSION_SECRET environment variable must be set for secure session management. Never use default secrets in production.")
+app.secret_key = SESSION_SECRET
 
 # ================================
 # BOT INSTANCE MANAGER
