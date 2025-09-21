@@ -143,10 +143,10 @@ export default function UserManagement() {
     }
   };
 
-  const filteredUsers = users.filter(user =>
+  const filteredUsers = users?.filter(user =>
     user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
     user.email.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  ) || [];
 
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
