@@ -40,11 +40,20 @@ def serve_index():
 # Import the bot API functionality directly
 sys.path.append(os.path.join(os.path.dirname(__file__), 'bot'))
 try:
-    from bot.api import InstagramBotAPI
-    bot_api = InstagramBotAPI()
+    # Use absolute import to fix relative import issues
+    import importlib.util
+    import os
+    bot_api_path = os.path.join(os.path.dirname(__file__), 'bot', 'api.py')
+    spec = importlib.util.spec_from_file_location("bot_api", bot_api_path)
+    bot_api_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bot_api_module)
+    bot_api = bot_api_module.InstagramBotAPI()
     print("[STARTUP] Bot API integrated successfully")
 except ImportError as e:
     print(f"[WARNING] Could not import bot API: {e}")
+    bot_api = None
+except Exception as e:
+    print(f"[WARNING] Bot API initialization failed: {e}")
     bot_api = None
 
 # Bot API Routes - Define these BEFORE the catch-all proxy

@@ -56,6 +56,8 @@ class InstagramBotAPI:
         self.story_module = None
         self.dm_module = None
         self.location_module = None
+        self.initialized = False
+        self.running = False
         
         # Initialize database first
         try:

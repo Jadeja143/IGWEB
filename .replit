@@ -56,6 +56,10 @@ localPort = 41207
 externalPort = 8008
 
 [[ports]]
+localPort = 44087
+externalPort = 8081
+
+[[ports]]
 localPort = 45187
 externalPort = 4200
 
@@ -86,3 +90,6 @@ author = "agent"
 task = "shell.exec"
 args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload main:app"
 waitForPort = 5000
+
+[agent]
+integrations = ["python_database:1.0.0"]
