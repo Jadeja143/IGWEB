@@ -317,15 +317,9 @@ def verify_csrf_token(token):
 
 @app.route('/api/csrf-token')
 def csrf_token():
-    """Endpoint to get CSRF token for authenticated users"""
+    """Endpoint to get CSRF token for any session (unauthenticated access allowed)"""
     try:
-        if 'user_id' not in session:
-            return jsonify({
-                "success": False,
-                "error": "E-AUTH-REQUIRED",
-                "message": "Authentication required"
-            }), 401
-        
+        # Allow unauthenticated access to get CSRF token for login/register
         return jsonify({
             "success": True,
             "csrf_token": get_csrf_token()
@@ -631,6 +625,7 @@ def serve_static(path):
 # ================================
 
 @app.route('/api/auth/register', methods=['POST'])
+@require_csrf
 def register():
     """Register new user"""
     try:
@@ -730,6 +725,7 @@ def register():
         }), 500
 
 @app.route('/api/auth/login', methods=['POST'])
+@require_csrf
 def login():
     """Login user"""
     try:
