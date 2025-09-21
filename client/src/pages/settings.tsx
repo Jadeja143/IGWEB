@@ -63,7 +63,8 @@ export default function Settings() {
 
   const updateLimitsMutation = useMutation({
     mutationFn: async (newLimits: typeof limits) => {
-      return await apiRequest("PUT", "/api/limits", newLimits);
+      const response = await apiRequest("PUT", "/api/limits", newLimits);
+      return await response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/limits"] });
@@ -83,7 +84,8 @@ export default function Settings() {
 
   const updateBotStatusMutation = useMutation({
     mutationFn: async (status: Partial<BotStatus>) => {
-      return await apiRequest("POST", "/api/bot/status", status);
+      const response = await apiRequest("POST", "/api/bot/status", status);
+      return await response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
@@ -103,7 +105,8 @@ export default function Settings() {
 
   const loginMutation = useMutation({
     mutationFn: async (credentials: { username: string; password: string; verification_code?: string }) => {
-      return await apiRequest("POST", "/api/bot/login", credentials);
+      const response = await apiRequest("POST", "/api/bot/login", credentials);
+      return await response.json();
     },
     onSuccess: (data, credentials) => {
       queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
@@ -140,7 +143,8 @@ export default function Settings() {
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest("POST", "/api/bot/logout", {});
+      const response = await apiRequest("POST", "/api/bot/logout", {});
+      return await response.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
@@ -160,7 +164,8 @@ export default function Settings() {
 
   const testConnectionMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest("POST", "/api/bot/test-connection", {});
+      const response = await apiRequest("POST", "/api/bot/test-connection", {});
+      return await response.json();
     },
     onSuccess: (data) => {
       toast({
