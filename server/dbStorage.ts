@@ -234,7 +234,7 @@ export class DatabaseStorage implements IStorage {
 
   async saveInstagramCredentials(credentials: InsertInstagramCredentials): Promise<InstagramCredentials> {
     // Encrypt the password with proper AES encryption
-    const encryptedData = encryptPassword(credentials.password);
+    const encryptedData = await encryptPassword(credentials.password);
     
     // Deactivate any existing credentials
     await db.update(instagramCredentials).set({ is_active: false });
@@ -302,8 +302,8 @@ export class DatabaseStorage implements IStorage {
 
     // Test encryption/decryption works
     try {
-      const encrypted = encryptPassword(credentials.password);
-      const decrypted = decryptPassword(encrypted);
+      const encrypted = await encryptPassword(credentials.password);
+      const decrypted = await decryptPassword(encrypted);
       
       if (decrypted !== credentials.password) {
         throw new Error("Encryption test failed");
@@ -336,7 +336,7 @@ export class DatabaseStorage implements IStorage {
 
     try {
       const encryptedData: EncryptedData = JSON.parse(credentials.password);
-      const decryptedPassword = decryptPassword(encryptedData);
+      const decryptedPassword = await decryptPassword(encryptedData);
       
       return {
         username: credentials.username,

@@ -35,10 +35,14 @@ export default function UserManagement() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
-  const [newUser, setNewUser] = useState({
+  const [newUser, setNewUser] = useState<{
+    username: string;
+    email: string;
+    role: "admin" | "user" | "viewer";
+  }>({
     username: "",
     email: "",
-    role: "user" as const,
+    role: "user",
   });
 
   // Mock users data - replace with real API call

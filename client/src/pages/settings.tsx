@@ -127,7 +127,7 @@ export default function Settings() {
   const testCredentialsMutation = useMutation({
     mutationFn: async (credentials: { username: string; password: string }) => {
       const response = await apiRequest("POST", "/api/instagram/credentials/test", credentials);
-      return response as { success: boolean; message: string };
+      return response as unknown as { success: boolean; message: string };
     },
     onSuccess: (data) => {
       toast({

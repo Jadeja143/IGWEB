@@ -114,8 +114,18 @@ export const insertInstagramCredentialsSchema = createInsertSchema(instagramCred
 
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
-export type BotStatus = typeof botStatus.$inferSelect;
+export type User = typeof users.$inferSelect & {
+  role?: "admin" | "user" | "viewer";
+};
+export type BotStatus = typeof botStatus.$inferSelect & {
+  credentials_configured?: boolean;
+  credentials_username?: string;
+  bot_api_accessible?: boolean;
+  error?: string;
+  initialized?: boolean;
+  running?: boolean;
+  modules_loaded?: boolean;
+};
 export type DailyStats = typeof dailyStats.$inferSelect;
 export type DailyLimits = typeof dailyLimits.$inferSelect;
 export type Hashtag = typeof hashtags.$inferSelect;

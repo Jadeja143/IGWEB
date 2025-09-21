@@ -77,7 +77,7 @@ export default function ActivityLogs() {
     const csvContent = [
       'Timestamp,Action,Status,Details',
       ...filteredLogs.map(log => 
-        `${new Date(log.timestamp).toISOString()},${log.action},${log.status},"${log.details || ''}"`
+        `${log.timestamp ? new Date(log.timestamp).toISOString() : new Date().toISOString()},${log.action},${log.status},"${log.details || ''}"`
       )
     ].join('\n');
     

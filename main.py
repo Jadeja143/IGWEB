@@ -16,9 +16,11 @@ from flask import Flask, request, Response, send_from_directory, send_file
 # Set environment variables for proper configuration
 os.environ['NODE_ENV'] = 'production'
 os.environ['BOT_API_URL'] = 'http://127.0.0.1:8001'
+os.environ['EXPRESS_PORT'] = '3000'  # Express server runs on port 3000 in proxy mode
 
 # Global process variables
 bot_api_process = None
+express_server_process = None
 servers_started = False
 
 # Flask WSGI app
@@ -35,14 +37,49 @@ def serve_index():
     """Serve the main React app"""
     return send_file('dist/public/index.html')
 
+# Proxy API routes to Node.js Express server
+@app.route('/api/<path:path>', methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'])
+def proxy_to_express(path):
+    """Proxy API requests to the Node.js Express server"""
+    if path.startswith('bot/'):
+        # Bot-specific routes are handled by Flask directly
+        return {"error": f"API endpoint /api/{path} not implemented in Flask"}, 404
+    
+    # All other API routes are proxied to Express server
+    try:
+        express_url = f"http://127.0.0.1:3000/api/{path}"
+        
+        # Get request data
+        json_data = None
+        if request.is_json:
+            json_data = request.get_json()
+        
+        # Forward the request to Express server
+        if request.method == 'GET':
+            response = requests.get(express_url, params=request.args, timeout=10)
+        else:
+            response = requests.request(
+                method=request.method,
+                url=express_url,
+                json=json_data,
+                params=request.args,
+                timeout=10
+            )
+        
+        # Return the response from Express server
+        return response.json(), response.status_code
+        
+    except requests.exceptions.ConnectionError:
+        return {"error": "Express server not available", "message": "The Node.js API server is not running"}, 503
+    except requests.exceptions.Timeout:
+        return {"error": "Request timeout"}, 504
+    except Exception as e:
+        return {"error": f"Proxy error: {str(e)}"}, 500
+
 # Catch-all route for React Router - this must be AFTER all API routes
 @app.route('/<path:path>')
 def serve_react_routes(path):
     """Serve React routes"""
-    # If it's an API route, return 404 (let other routes handle it)
-    if path.startswith('api/'):
-        return {"error": "API endpoint not found"}, 404
-    
     # For all client-side routes, serve the React app
     return send_file('dist/public/index.html')
 
@@ -108,10 +145,49 @@ def get_bot_stats():
             return {"error": str(e)}, 500
     return {"error": "Bot API not available"}, 503
 
+def start_express_server():
+    """Start the Node.js Express server"""
+    global express_server_process
+    try:
+        print("[STARTUP] Starting Node.js Express server on port 3000...")
+        express_server_process = subprocess.Popen(
+            ['node', 'dist/index.js'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            preexec_fn=os.setsid if hasattr(os, 'setsid') else None
+        )
+        
+        # Give the server a moment to start
+        time.sleep(2)
+        
+        # Check if the server started successfully
+        if express_server_process.poll() is None:
+            print("[STARTUP] Express server started successfully")
+            return True
+        else:
+            stdout, stderr = express_server_process.communicate()
+            print(f"[ERROR] Express server failed to start: {stderr.decode()}")
+            return False
+            
+    except Exception as e:
+        print(f"[ERROR] Failed to start Express server: {e}")
+        return False
+
 def cleanup():
     """Clean up all processes"""
-    global bot_api_process
+    global bot_api_process, express_server_process
     print("[SHUTDOWN] Cleaning up servers...")
+    
+    if express_server_process:
+        try:
+            # Kill the process group to ensure all child processes are terminated
+            if hasattr(os, 'killpg'):
+                os.killpg(os.getpgid(express_server_process.pid), signal.SIGTERM)
+            else:
+                express_server_process.terminate()
+            express_server_process.wait(timeout=5)
+        except:
+            pass
     
     if bot_api_process:
         try:
@@ -128,11 +204,24 @@ def health():
     """Health check endpoint"""
     return {"status": "running", "message": "Instagram Bot Management System", "version": "2.0"}
 
-# Additional API routes that may be needed
-@app.route('/api/<path:path>', methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'])
-def api_fallback(path):
-    """Handle other API routes that aren't bot-specific"""
-    return {"error": f"API endpoint /{path} not implemented"}, 404
+def initialize_servers():
+    """Initialize all required servers"""
+    global servers_started
+    if not servers_started:
+        # Start the Express server
+        if start_express_server():
+            servers_started = True
+            print("[STARTUP] All servers initialized successfully")
+        else:
+            print("[WARNING] Express server failed to start - some API endpoints may not be available")
+
+# Initialize servers using a thread to avoid blocking
+def delayed_server_init():
+    """Initialize servers after a brief delay"""
+    threading.Timer(1.0, initialize_servers).start()
+
+# Start server initialization in the background
+delayed_server_init()
 
 if __name__ == "__main__":
     # This handles direct execution

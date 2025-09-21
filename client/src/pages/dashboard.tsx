@@ -175,7 +175,7 @@ export default function Dashboard() {
                   <div className="flex-1">
                     <p className="text-sm font-medium">{log.details || log.action}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(log.timestamp).toLocaleTimeString()}
+                      {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : 'No timestamp'}
                     </p>
                   </div>
                 </div>
