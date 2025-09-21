@@ -42,7 +42,15 @@ def serve_react_routes(path):
     # If it's an API route, don't serve the React app
     if path.startswith('api/'):
         return "API endpoint not found", 404
-    # For all other routes, serve the React app
+    
+    # Check if there's an actual file (like assets)
+    if '.' in path and not path.startswith(('analytics', 'users', 'automation', 'content', 'settings', 'logs')):
+        try:
+            return send_from_directory('dist/public', path)
+        except:
+            pass
+    
+    # For all other routes (including React routes), serve the React app
     return send_file('dist/public/index.html')
 
 # Import the bot API functionality directly
