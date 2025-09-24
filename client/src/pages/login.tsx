@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -13,6 +14,7 @@ export default function Login() {
   const [showRegister, setShowRegister] = useState(false);
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const { checkAuth } = useAuth();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,6 +48,8 @@ export default function Login() {
           title: "Login successful",
           description: "Welcome to the Instagram Bot Management Dashboard",
         });
+        // Refresh authentication state
+        await checkAuth();
         setLocation("/");
       } else {
         toast({
@@ -97,6 +101,8 @@ export default function Login() {
           title: "Registration successful",
           description: "Account created and logged in successfully",
         });
+        // Refresh authentication state
+        await checkAuth();
         setLocation("/");
       } else {
         toast({
