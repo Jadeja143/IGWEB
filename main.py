@@ -287,11 +287,12 @@ if not SESSION_SECRET:
 app.secret_key = SESSION_SECRET
 
 # Configure secure session settings
-# Note: Relaxed for development environment compatibility
+# Note: Optimized for browser compatibility in development environment
 app.config.update(
     SESSION_COOKIE_SECURE=False,  # Allow HTTP in development 
     SESSION_COOKIE_HTTPONLY=True,  # Prevent XSS access to session cookie
-    SESSION_COOKIE_SAMESITE='Lax',  # CSRF protection
+    SESSION_COOKIE_SAMESITE='Lax',  # CSRF protection - Lax allows cross-site requests
+    SESSION_COOKIE_NAME='instagram_bot_session',  # Custom cookie name for clarity
     PERMANENT_SESSION_LIFETIME=1800  # 30 minutes session timeout
 )
 
